@@ -1,0 +1,357 @@
+"""Check an IFC model: run the IDS rule pack, then the UBBL schedule rules.
+
+The IDS pass checks the model *carries* the data; the rule pass checks the
+data *complies*: compartment sizes (Fifth Schedule), declared travel distances,
+occupant load against exit capacity (Seventh Schedule), compartment floors
+above 30 m (by-law 137), fire door ratings (by-law 162), and the fire-fighting
+systems the building height or sprinkler flag calls for (by-law 229-231).
+"""
+from __future__ import annotations
+
+import os
+import re
+import xml.etree.ElementTree as ET
+from collections import defaultdict
+
+import ifcopenshell
+import ifcopenshell.util.element as uel
+import ifcopenshell.util.unit as uunit
+from ifctester import ids
+
+from . import ubbl
+from .findings import Finding
+
+IDS_DIR = os.path.join(os.path.dirname(__file__), "ids")
+PSET = "MY_FireSafety"
+
+
+def frp_minutes(label) -> int | None:
+    """'60', 'FRP 60 min', '1 HR', '1/2 hour' -> minutes; None if unreadable."""
+    if label is None:
+        return None
+    s = str(label).strip().lower()
+    m = re.fullmatch(r"(frp ?)?(\d+) ?(min|mins)?", s)
+    if m:
+        return int(m.group(2))
+    m = re.fullmatch(r"(frp ?)?(1/2|\d+(?:\.\d+)?) ?(hr|hrs|hour|hours)", s)
+    if m:
+        v = 0.5 if m.group(2) == "1/2" else float(m.group(2))
+        return int(round(v * 60))
+    return None
+
+
+# ---------------------------------------------------------------- IDS pass
+
+def _identifiers(path: str) -> list[str | None]:
+    """ifctester drops the identifier attribute when parsing; read it here."""
+    ns = "{http://standards.buildingsmart.org/IDS}"
+    root = ET.parse(path).getroot()
+    return [s.get("identifier") for s in root.iter(ns + "specification")]
+
+
+def run_ids(model: ifcopenshell.file, ids_paths: list[str]) -> list[Finding]:
+    out = []
+    for path in ids_paths:
+        spec_doc = ids.open(path)
+        idents = _identifiers(path)
+        spec_doc.validate(model)
+        for k, spec in enumerate(spec_doc.specifications):
+            if spec.status:
+                continue
+            ident = (idents[k] if k < len(idents) else None) or spec.name
+            failed = getattr(spec, "failed_entities", set())
+            if not spec.applicable_entities and spec.minOccurs and int(spec.minOccurs) > 0:
+                out.append(Finding(f"IDS-{ident}", "error",
+                                   f"{spec.name}: no applicable objects in the model ({spec.description})",
+                                   spec.instructions or "", []))
+                continue
+            reasons = []
+            for req in spec.requirements:
+                for fail in getattr(req, "failures", []):
+                    reasons.append(fail.get("reason") if isinstance(fail, dict) else getattr(fail, "reason", ""))
+            where = [e.GlobalId for e in failed if hasattr(e, "GlobalId")]
+            out.append(Finding(f"IDS-{ident}", "error",
+                               f"{spec.name}: {len(where)} object(s) fail. {spec.description}",
+                               spec.instructions or "", sorted(where),
+                               {"reasons": sorted({r for r in reasons if r})[:5]}))
+    return out
+
+
+# ---------------------------------------------------------------- model facts
+
+def _prop(el, pset, name, default=None):
+    return uel.get_psets(el).get(pset, {}).get(name, default)
+
+
+class Facts:
+    """The few numbers the rules need, read once from the model in metres."""
+
+    def __init__(self, model: ifcopenshell.file):
+        self.model = model
+        self.scale = uunit.calculate_unit_scale(model)  # project length unit -> metres
+        b = (model.by_type("IfcBuilding") or [None])[0]
+        self.building = b
+        self.group = _prop(b, PSET, "PurposeGroup") if b else None
+        self.use = _prop(b, PSET, "SubUse") if b else None
+        self.height = _prop(b, PSET, "BuildingHeight") if b else None
+        if self.height is not None:
+            self.height = float(self.height) * self.scale
+        self.sprinklered = bool(_prop(b, "Pset_BuildingCommon", "SprinklerProtectionAutomatic", False)) if b else False
+        self.storeys = sorted(model.by_type("IfcBuildingStorey"), key=lambda s: s.Elevation or 0.0)
+        ground = [s for s in self.storeys if (s.Elevation or 0.0) >= -1e-6]
+        self.ground_elev = (ground[0].Elevation or 0.0) * self.scale if ground else 0.0
+
+    def storey_of(self, el):
+        c = uel.get_container(el) or uel.get_aggregate(el)
+        while c is not None and not c.is_a("IfcBuildingStorey"):
+            c = uel.get_aggregate(c)
+        return c
+
+    def elev(self, storey) -> float:
+        return (storey.Elevation or 0.0) * self.scale - self.ground_elev
+
+    def area(self, space) -> float | None:
+        q = uel.get_psets(space, qtos_only=True).get("Qto_SpaceBaseQuantities", {})
+        a = q.get("NetFloorArea", q.get("GrossFloorArea"))
+        return None if a is None else float(a) * self.scale ** 2
+
+    def volume(self, space) -> float | None:
+        q = uel.get_psets(space, qtos_only=True).get("Qto_SpaceBaseQuantities", {})
+        v = q.get("NetVolume", q.get("GrossVolume"))
+        if v is not None:
+            return float(v) * self.scale ** 3
+        a = self.area(space)
+        h = q.get("Height", q.get("FinishCeilingHeight"))
+        return None if a is None or h is None else a * float(h) * self.scale
+
+
+# ---------------------------------------------------------------- rule pass
+
+def check_rules(model: ifcopenshell.file) -> list[Finding]:
+    f = Facts(model)
+    out: list[Finding] = []
+    if f.group not in ubbl.PURPOSE_GROUPS:
+        out.append(Finding("IFC-GROUP", "error",
+                           f"Building purpose group is {f.group!r}; rules need one of I-VIII",
+                           "UBBL by-law 134, Fifth Schedule",
+                           [f.building.GlobalId] if f.building else []))
+        return out
+    height = f.height
+    if height is None and f.storeys:
+        height = max(f.elev(s) for s in f.storeys)
+        out.append(Finding("IFC-HEIGHT", "info",
+                           f"BuildingHeight not given; using top storey elevation {height:.1f} m "
+                           "(lower than the by-law 135(a) height)", "UBBL by-law 135(a)", []))
+    height = height or 0.0
+    single = len([s for s in f.storeys if f.elev(s) >= -1e-6]) <= 1
+    out += _compartments(f, height, single)
+    out += _travel(f)
+    out += _exits(f)
+    out += _compartment_floors(f, height)
+    out += _fire_doors(f)
+    out += _systems(f)
+    return out
+
+
+def _compartments(f: Facts, height, single):
+    out = []
+    lim = ubbl.compartment_limit(f.group, height, single, f.sprinklered)
+    if lim is None:
+        return out
+    area = defaultdict(float)
+    vol = defaultdict(float)
+    members = defaultdict(list)
+    no_vol = set()
+    for sp in f.model.by_type("IfcSpace"):
+        cid = _prop(sp, PSET, "CompartmentId")
+        st = f.storey_of(sp)
+        if cid is None or st is None:
+            continue
+        a = f.area(sp)
+        if a is not None:
+            area[(cid, st.Name)] += a
+        v = f.volume(sp)
+        if v is None:
+            no_vol.add(cid)
+        else:
+            vol[cid] += v
+        members[cid].append(sp.GlobalId)
+    for (cid, storey), a in sorted(area.items()):
+        if a > lim.area_m2:
+            out.append(Finding("IFC-COMP-AREA", "error",
+                               f"Compartment {cid} on {storey}: storey area {a:.0f} m2 exceeds "
+                               f"{lim.area_m2:.0f} m2 for purpose group {f.group} at {height:.1f} m",
+                               lim.clause, members[cid], {"area_m2": a, "limit_m2": lim.area_m2}))
+    for cid, v in sorted(vol.items()):
+        if v > lim.volume_m3:
+            out.append(Finding("IFC-COMP-VOL", "error",
+                               f"Compartment {cid}: volume {v:.0f} m3 exceeds {lim.volume_m3:.0f} m3",
+                               lim.clause, members[cid], {"volume_m3": v, "limit_m3": lim.volume_m3}))
+    if no_vol and lim.volume_m3 != ubbl.INF:
+        out.append(Finding("IFC-COMP-VOL-DATA", "warning",
+                           f"Volume limit {lim.volume_m3:.0f} m3 applies but spaces in compartment(s) "
+                           f"{', '.join(sorted(map(str, no_vol)))} have no volume or height quantity",
+                           lim.clause, []))
+    return out
+
+
+def _travel(f: Facts):
+    out = []
+    try:
+        lim = ubbl.travel_limit(f.group, f.sprinklered, f.use)
+    except KeyError as e:
+        return [Finding("IFC-TRAVEL-USE", "warning", str(e), "UBBL Seventh Schedule", [])]
+    if lim.travel_m is None:
+        return out
+    for sp in f.model.by_type("IfcSpace"):
+        d = _prop(sp, PSET, "MaxTravelDistance")
+        if d is None:
+            continue
+        d = float(d) * f.scale
+        if d > lim.travel_m + 1e-9:
+            out.append(Finding("IFC-TRAVEL", "error",
+                               f"Space {sp.Name or sp.GlobalId}: travel distance {d:.1f} m exceeds "
+                               f"{lim.travel_m:g} m ({'sprinklered' if f.sprinklered else 'unsprinklered'}, "
+                               f"group {f.group})", lim.clause, [sp.GlobalId],
+                               {"travel_m": d, "limit_m": lim.travel_m}))
+        dead = _prop(sp, PSET, "DeadEndDistance")
+        if dead is not None and lim.dead_end_m is not None and float(dead) * f.scale > lim.dead_end_m:
+            out.append(Finding("IFC-DEADEND", "error",
+                               f"Space {sp.Name or sp.GlobalId}: dead end {float(dead) * f.scale:.1f} m "
+                               f"exceeds {lim.dead_end_m:g} m", lim.clause, [sp.GlobalId]))
+    return out
+
+
+def _exits(f: Facts):
+    out = []
+    if f.group not in ubbl.EXIT_CAPACITY:
+        return out
+    load = defaultdict(int)
+    doors = defaultdict(list)
+    for sp in f.model.by_type("IfcSpace"):
+        st, a = f.storey_of(sp), f.area(sp)
+        if st is None or a is None:
+            continue
+        use = _prop(sp, PSET, "OccupancyUse")
+        try:
+            load[st.Name] += ubbl.occupant_load(a, f.group, use)
+        except KeyError:
+            continue
+    for d in f.model.by_type("IfcDoor"):
+        if _prop(d, "Pset_DoorCommon", "FireExit") is True:
+            st = f.storey_of(d)
+            if st is not None:
+                doors[st.Name].append(d)
+    for storey, persons in sorted(load.items()):
+        ds = doors.get(storey, [])
+        gids = [d.GlobalId for d in ds]
+        if persons > 0 and len(ds) < ubbl.MIN_EXITS:
+            out.append(Finding("IFC-EXIT-COUNT", "error",
+                               f"{storey}: {len(ds)} exit door(s) for {persons} persons; minimum is {ubbl.MIN_EXITS}",
+                               "UBBL by-law 177(d)", gids))
+        need = ubbl.exit_units(persons, f.group, "door", f.use) if persons else 0
+        have = sum(ubbl.width_units((d.OverallWidth or 0) * f.scale * 1000) for d in ds)
+        if have < need:
+            out.append(Finding("IFC-EXIT-WIDTH", "error",
+                               f"{storey}: occupant load {persons} needs {need} units of 550 mm exit width; "
+                               f"exit doors give {have}", "UBBL by-law 175-176, Seventh Schedule", gids,
+                               {"persons": persons, "units_needed": need, "units_given": have}))
+    return out
+
+
+def _compartment_floors(f: Facts, height):
+    out = []
+    if height <= ubbl.COMPARTMENT_FLOOR_HEIGHT_M:
+        return out
+    for sl in f.model.by_type("IfcSlab"):
+        if (sl.PredefinedType or "") not in ("FLOOR", "BASESLAB", "NOTDEFINED", None):
+            continue
+        st = f.storey_of(sl)
+        if st is None or f.elev(st) <= ubbl.COMPARTMENT_FLOOR_ABOVE_M:
+            continue
+        if _prop(sl, "Pset_SlabCommon", "Compartmentation") is not True:
+            out.append(Finding("IFC-COMP-FLOOR", "error",
+                               f"Building is {height:.1f} m high; floor on {st.Name} "
+                               f"({f.elev(st):.1f} m above ground) must be a compartment floor",
+                               "UBBL by-law 137", [sl.GlobalId]))
+    return out
+
+
+def _host_wall(door):
+    for rel in getattr(door, "FillsVoids", []) or []:
+        opening = rel.RelatingOpeningElement
+        for v in getattr(opening, "VoidsElements", []) or []:
+            return v.RelatingBuildingElement
+    return None
+
+
+def _fire_doors(f: Facts):
+    out = []
+    for d in f.model.by_type("IfcDoor"):
+        wall = _host_wall(d)
+        if wall is None or not wall.is_a("IfcWall"):
+            continue
+        if _prop(wall, "Pset_WallCommon", "Compartmentation") is not True:
+            continue
+        wr = frp_minutes(_prop(wall, "Pset_WallCommon", "FireRating"))
+        dr = frp_minutes(_prop(d, "Pset_DoorCommon", "FireRating"))
+        name = d.Name or d.GlobalId
+        if dr is None:
+            out.append(Finding("IFC-FIREDOOR", "error",
+                               f"Door {name} is in compartment wall {wall.Name or wall.GlobalId} but has no fire rating",
+                               "UBBL by-law 162(1)-(2)", [d.GlobalId, wall.GlobalId]))
+        elif dr < 30:
+            out.append(Finding("IFC-FIREDOOR", "error", f"Door {name}: FRP {dr} min is below half an hour",
+                               "UBBL by-law 162(3)", [d.GlobalId]))
+        elif wr is not None and dr < wr:
+            out.append(Finding("IFC-FIREDOOR-WALL", "warning",
+                               f"Door {name}: FRP {dr} min is less than its compartment wall's {wr} min; "
+                               "confirm against the Ninth Schedule", "UBBL by-law 162(2), Ninth Schedule",
+                               [d.GlobalId, wall.GlobalId]))
+    return out
+
+
+def _terminals(f: Facts, ptype):
+    return [t for t in f.model.by_type("IfcFireSuppressionTerminal") if (t.PredefinedType or "") == ptype]
+
+
+def _systems(f: Facts):
+    out = []
+    top = max((f.elev(s) for s in f.storeys), default=0.0)
+    if f.sprinklered and not _terminals(f, "SPRINKLER"):
+        out.append(Finding("IFC-SPRINKLER", "warning",
+                           "Building is declared sprinklered but the model has no sprinkler heads "
+                           "(fine for an architectural model; needed in the active model)",
+                           "UBBL by-law 136 proviso, 225(1)", [f.building.GlobalId]))
+    if top > 18.3:
+        if not _terminals(f, "BREECHINGINLET"):
+            out.append(Finding("IFC-RISER", "warning",
+                               f"Topmost floor is {top:.1f} m above ground: a {'dry' if top < 30.5 else 'wet'} "
+                               "rising system is required; no breeching inlet is modelled",
+                               "UBBL by-law 229(1), 230(1), 231", []))
+        lifts = [t for t in f.model.by_type("IfcTransportElement")
+                 if _prop(t, "Pset_TransportElementElevator", "FireFightingLift") is True]
+        if not lifts:
+            out.append(Finding("IFC-FIRELIFT", "warning",
+                               f"Topmost floor is {top:.1f} m above ground: a fire lift is required; none is "
+                               "flagged (Pset_TransportElementElevator.FireFightingLift)", "UBBL by-law 229(5), 243", []))
+    if top > 30.5 and _terminals(f, "BREECHINGINLET"):
+        out.append(Finding("IFC-WETRISER", "info",
+                           f"Topmost floor is {top:.1f} m above ground: the rising system must be wet, not dry",
+                           "UBBL by-law 231", []))
+    return out
+
+
+# ---------------------------------------------------------------- entry
+
+def default_ids() -> list[str]:
+    d = os.path.abspath(IDS_DIR)
+    return [os.path.join(d, n) for n in ("my-ubbl-passive.ids", "my-ubbl-active.ids")]
+
+
+def check(path: str, ids_paths: list[str] | None = None, rules: bool = True) -> list[Finding]:
+    model = ifcopenshell.open(path)
+    out = run_ids(model, ids_paths if ids_paths is not None else default_ids())
+    if rules:
+        out += check_rules(model)
+    return out
