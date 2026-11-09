@@ -1,0 +1,207 @@
+<?xml version='1.0' encoding='utf-8'?>
+<ids xmlns="http://standards.buildingsmart.org/IDS" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://standards.buildingsmart.org/IDS http://standards.buildingsmart.org/IDS/1.0/ids.xsd">
+    <info>
+        <title>IFC-MY fire data: active (UBBL 1984 Part VIII)</title>
+        <version>0.1.0</version>
+        <description>How fire-system objects are modelled for a Bomba active submission. Which systems a building needs (Tenth Schedule, by-law 229, sprinkler flag) is decided by the rule checks, not here.</description>
+        <author>ubblcheck@example.org</author>
+        <purpose>Pre-submission check</purpose>
+        <milestone>Bomba active submission</milestone>
+    </info>
+    <specifications>
+        <specification name="Fire hydrant" ifcVersion="IFC4" identifier="MY-A01" description="Fire hydrant objects are IFCFIRESUPPRESSIONTERMINAL.FIREHYDRANT, tagged." instructions="By-law 225(2): at least one hydrant within 91.5 m of fire brigade access">
+            <applicability minOccurs="0" maxOccurs="unbounded">
+                <entity>
+                    <name>
+                        <simpleValue>IFCFIRESUPPRESSIONTERMINAL</simpleValue>
+                    </name>
+                    <predefinedType>
+                        <simpleValue>FIREHYDRANT</simpleValue>
+                    </predefinedType>
+                </entity>
+            </applicability>
+            <requirements>
+                <attribute cardinality="required">
+                    <name>
+                        <simpleValue>Tag</simpleValue>
+                    </name>
+                </attribute>
+            </requirements>
+        </specification>
+        <specification name="Breeching inlet" ifcVersion="IFC4" identifier="MY-A02" description="Breeching inlet objects are IFCFIRESUPPRESSIONTERMINAL.BREECHINGINLET, tagged." instructions="By-law 229-231: dry or wet rising system inlets">
+            <applicability minOccurs="0" maxOccurs="unbounded">
+                <entity>
+                    <name>
+                        <simpleValue>IFCFIRESUPPRESSIONTERMINAL</simpleValue>
+                    </name>
+                    <predefinedType>
+                        <simpleValue>BREECHINGINLET</simpleValue>
+                    </predefinedType>
+                </entity>
+            </applicability>
+            <requirements>
+                <attribute cardinality="required">
+                    <name>
+                        <simpleValue>Tag</simpleValue>
+                    </name>
+                </attribute>
+            </requirements>
+        </specification>
+        <specification name="Hose reel" ifcVersion="IFC4" identifier="MY-A03" description="Hose reel objects are IFCFIRESUPPRESSIONTERMINAL.HOSEREEL, tagged and contained in a storey." instructions="By-law 225(1) and Tenth Schedule">
+            <applicability minOccurs="0" maxOccurs="unbounded">
+                <entity>
+                    <name>
+                        <simpleValue>IFCFIRESUPPRESSIONTERMINAL</simpleValue>
+                    </name>
+                    <predefinedType>
+                        <simpleValue>HOSEREEL</simpleValue>
+                    </predefinedType>
+                </entity>
+            </applicability>
+            <requirements>
+                <partOf relation="IFCRELCONTAINEDINSPATIALSTRUCTURE" cardinality="required">
+                    <entity>
+                        <name>
+                            <simpleValue>IFCBUILDINGSTOREY</simpleValue>
+                        </name>
+                    </entity>
+                </partOf>
+                <attribute cardinality="required">
+                    <name>
+                        <simpleValue>Tag</simpleValue>
+                    </name>
+                </attribute>
+            </requirements>
+        </specification>
+        <specification name="Sprinkler head" ifcVersion="IFC4" identifier="MY-A04" description="Sprinkler head objects are IFCFIRESUPPRESSIONTERMINAL.SPRINKLER, tagged and contained in a storey." instructions="By-law 225(1), 226 and Tenth Schedule">
+            <applicability minOccurs="0" maxOccurs="unbounded">
+                <entity>
+                    <name>
+                        <simpleValue>IFCFIRESUPPRESSIONTERMINAL</simpleValue>
+                    </name>
+                    <predefinedType>
+                        <simpleValue>SPRINKLER</simpleValue>
+                    </predefinedType>
+                </entity>
+            </applicability>
+            <requirements>
+                <partOf relation="IFCRELCONTAINEDINSPATIALSTRUCTURE" cardinality="required">
+                    <entity>
+                        <name>
+                            <simpleValue>IFCBUILDINGSTOREY</simpleValue>
+                        </name>
+                    </entity>
+                </partOf>
+                <attribute cardinality="required">
+                    <name>
+                        <simpleValue>Tag</simpleValue>
+                    </name>
+                </attribute>
+            </requirements>
+        </specification>
+        <specification name="Fire alarm break glass" ifcVersion="IFC4" identifier="MY-A05" description="Fire alarm break glass objects are IFCALARM.BREAKGLASSBUTTON, tagged and contained in a storey." instructions="By-law 237 and Tenth Schedule">
+            <applicability minOccurs="0" maxOccurs="unbounded">
+                <entity>
+                    <name>
+                        <simpleValue>IFCALARM</simpleValue>
+                    </name>
+                    <predefinedType>
+                        <simpleValue>BREAKGLASSBUTTON</simpleValue>
+                    </predefinedType>
+                </entity>
+            </applicability>
+            <requirements>
+                <partOf relation="IFCRELCONTAINEDINSPATIALSTRUCTURE" cardinality="required">
+                    <entity>
+                        <name>
+                            <simpleValue>IFCBUILDINGSTOREY</simpleValue>
+                        </name>
+                    </entity>
+                </partOf>
+                <attribute cardinality="required">
+                    <name>
+                        <simpleValue>Tag</simpleValue>
+                    </name>
+                </attribute>
+            </requirements>
+        </specification>
+        <specification name="Fire alarm bell" ifcVersion="IFC4" identifier="MY-A06" description="Fire alarm bell objects are IFCALARM.BELL, tagged and contained in a storey." instructions="By-law 237 and Tenth Schedule">
+            <applicability minOccurs="0" maxOccurs="unbounded">
+                <entity>
+                    <name>
+                        <simpleValue>IFCALARM</simpleValue>
+                    </name>
+                    <predefinedType>
+                        <simpleValue>BELL</simpleValue>
+                    </predefinedType>
+                </entity>
+            </applicability>
+            <requirements>
+                <partOf relation="IFCRELCONTAINEDINSPATIALSTRUCTURE" cardinality="required">
+                    <entity>
+                        <name>
+                            <simpleValue>IFCBUILDINGSTOREY</simpleValue>
+                        </name>
+                    </entity>
+                </partOf>
+                <attribute cardinality="required">
+                    <name>
+                        <simpleValue>Tag</simpleValue>
+                    </name>
+                </attribute>
+            </requirements>
+        </specification>
+        <specification name="Smoke detector" ifcVersion="IFC4" identifier="MY-A07" description="Smoke detector objects are IFCSENSOR.SMOKESENSOR, tagged and contained in a storey." instructions="By-law 153 (lift lobbies), 225(1) and Tenth Schedule">
+            <applicability minOccurs="0" maxOccurs="unbounded">
+                <entity>
+                    <name>
+                        <simpleValue>IFCSENSOR</simpleValue>
+                    </name>
+                    <predefinedType>
+                        <simpleValue>SMOKESENSOR</simpleValue>
+                    </predefinedType>
+                </entity>
+            </applicability>
+            <requirements>
+                <partOf relation="IFCRELCONTAINEDINSPATIALSTRUCTURE" cardinality="required">
+                    <entity>
+                        <name>
+                            <simpleValue>IFCBUILDINGSTOREY</simpleValue>
+                        </name>
+                    </entity>
+                </partOf>
+                <attribute cardinality="required">
+                    <name>
+                        <simpleValue>Tag</simpleValue>
+                    </name>
+                </attribute>
+            </requirements>
+        </specification>
+        <specification name="Heat detector" ifcVersion="IFC4" identifier="MY-A08" description="Heat detector objects are IFCSENSOR.HEATSENSOR, tagged and contained in a storey." instructions="By-law 225(1) and Tenth Schedule">
+            <applicability minOccurs="0" maxOccurs="unbounded">
+                <entity>
+                    <name>
+                        <simpleValue>IFCSENSOR</simpleValue>
+                    </name>
+                    <predefinedType>
+                        <simpleValue>HEATSENSOR</simpleValue>
+                    </predefinedType>
+                </entity>
+            </applicability>
+            <requirements>
+                <partOf relation="IFCRELCONTAINEDINSPATIALSTRUCTURE" cardinality="required">
+                    <entity>
+                        <name>
+                            <simpleValue>IFCBUILDINGSTOREY</simpleValue>
+                        </name>
+                    </entity>
+                </partOf>
+                <attribute cardinality="required">
+                    <name>
+                        <simpleValue>Tag</simpleValue>
+                    </name>
+                </attribute>
+            </requirements>
+        </specification>
+    </specifications>
+</ids>

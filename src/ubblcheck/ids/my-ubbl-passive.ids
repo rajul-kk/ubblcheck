@@ -1,0 +1,322 @@
+<?xml version='1.0' encoding='utf-8'?>
+<ids xmlns="http://standards.buildingsmart.org/IDS" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://standards.buildingsmart.org/IDS http://standards.buildingsmart.org/IDS/1.0/ids.xsd">
+    <info>
+        <title>IFC-MY fire data: passive (UBBL 1984 Part VII)</title>
+        <version>0.1.0</version>
+        <description>Model data needed to check a building against UBBL 1984 Part VII (fire requirements) before a Bomba passive submission. MY_FireSafety is a provisional property set pending the CIDB NBeS IFC guideline.</description>
+        <author>ubblcheck@example.org</author>
+        <purpose>Pre-submission check</purpose>
+        <milestone>Bomba passive submission</milestone>
+    </info>
+    <specifications>
+        <specification name="Building purpose group" ifcVersion="IFC2X3 IFC4" identifier="MY-P01" description="Every building declares its UBBL purpose group." instructions="By-law 134 and Fifth Schedule. Values I-VIII.">
+            <applicability minOccurs="1" maxOccurs="unbounded">
+                <entity>
+                    <name>
+                        <simpleValue>IFCBUILDING</simpleValue>
+                    </name>
+                </entity>
+            </applicability>
+            <requirements>
+                <property dataType="IFCLABEL" cardinality="required">
+                    <propertySet>
+                        <simpleValue>MY_FireSafety</simpleValue>
+                    </propertySet>
+                    <baseName>
+                        <simpleValue>PurposeGroup</simpleValue>
+                    </baseName>
+                    <value>
+                        <xs:restriction base="xs:string">
+                            <xs:enumeration value="I" />
+                            <xs:enumeration value="II" />
+                            <xs:enumeration value="III" />
+                            <xs:enumeration value="IV" />
+                            <xs:enumeration value="V" />
+                            <xs:enumeration value="VI" />
+                            <xs:enumeration value="VII" />
+                            <xs:enumeration value="VIII" />
+                        </xs:restriction>
+                    </value>
+                </property>
+            </requirements>
+        </specification>
+        <specification name="Building height" ifcVersion="IFC2X3 IFC4" identifier="MY-P02" description="Every building states its height as measured under by-law 135(a)." instructions="Height thresholds in the Fifth Schedule (28 m) and by-law 137 (30 m) depend on it.">
+            <applicability minOccurs="1" maxOccurs="unbounded">
+                <entity>
+                    <name>
+                        <simpleValue>IFCBUILDING</simpleValue>
+                    </name>
+                </entity>
+            </applicability>
+            <requirements>
+                <property dataType="IFCLENGTHMEASURE" cardinality="required">
+                    <propertySet>
+                        <simpleValue>MY_FireSafety</simpleValue>
+                    </propertySet>
+                    <baseName>
+                        <simpleValue>BuildingHeight</simpleValue>
+                    </baseName>
+                </property>
+            </requirements>
+        </specification>
+        <specification name="Sprinkler protection declared" ifcVersion="IFC2X3 IFC4" identifier="MY-P03" description="Every building says whether it has an automatic sprinkler installation." instructions="By-law 136 proviso doubles compartment limits; Seventh Schedule travel distances differ for sprinklered buildings.">
+            <applicability minOccurs="1" maxOccurs="unbounded">
+                <entity>
+                    <name>
+                        <simpleValue>IFCBUILDING</simpleValue>
+                    </name>
+                </entity>
+            </applicability>
+            <requirements>
+                <property dataType="IFCBOOLEAN" cardinality="required">
+                    <propertySet>
+                        <simpleValue>Pset_BuildingCommon</simpleValue>
+                    </propertySet>
+                    <baseName>
+                        <simpleValue>SprinklerProtectionAutomatic</simpleValue>
+                    </baseName>
+                </property>
+            </requirements>
+        </specification>
+        <specification name="Storey elevation" ifcVersion="IFC2X3 IFC4" identifier="MY-P04" description="Every storey has an elevation." instructions="Needed to find floors more than 9 m above ground (by-law 137).">
+            <applicability minOccurs="1" maxOccurs="unbounded">
+                <entity>
+                    <name>
+                        <simpleValue>IFCBUILDINGSTOREY</simpleValue>
+                    </name>
+                </entity>
+            </applicability>
+            <requirements>
+                <attribute cardinality="required">
+                    <name>
+                        <simpleValue>Elevation</simpleValue>
+                    </name>
+                </attribute>
+            </requirements>
+        </specification>
+        <specification name="Space compartment" ifcVersion="IFC2X3 IFC4" identifier="MY-P05" description="Every space names the fire compartment it belongs to." instructions="By-law 136: storey area and volume are limited per compartment.">
+            <applicability minOccurs="1" maxOccurs="unbounded">
+                <entity>
+                    <name>
+                        <simpleValue>IFCSPACE</simpleValue>
+                    </name>
+                </entity>
+            </applicability>
+            <requirements>
+                <property dataType="IFCLABEL" cardinality="required">
+                    <propertySet>
+                        <simpleValue>MY_FireSafety</simpleValue>
+                    </propertySet>
+                    <baseName>
+                        <simpleValue>CompartmentId</simpleValue>
+                    </baseName>
+                </property>
+            </requirements>
+        </specification>
+        <specification name="Space floor area" ifcVersion="IFC2X3 IFC4" identifier="MY-P06" description="Every space carries a net floor area quantity." instructions="By-law 175-176 and Seventh Schedule: occupant load is floor area over the load factor.">
+            <applicability minOccurs="1" maxOccurs="unbounded">
+                <entity>
+                    <name>
+                        <simpleValue>IFCSPACE</simpleValue>
+                    </name>
+                </entity>
+            </applicability>
+            <requirements>
+                <property cardinality="required">
+                    <propertySet>
+                        <simpleValue>Qto_SpaceBaseQuantities</simpleValue>
+                    </propertySet>
+                    <baseName>
+                        <simpleValue>NetFloorArea</simpleValue>
+                    </baseName>
+                </property>
+            </requirements>
+        </specification>
+        <specification name="Space travel distance" ifcVersion="IFC2X3 IFC4" identifier="MY-P07" description="Every space states the longest travel distance from it to the nearest storey exit." instructions="By-law 165 and Seventh Schedule. The value is the designer's measured distance along the walking line; the check compares it with the limit.">
+            <applicability minOccurs="1" maxOccurs="unbounded">
+                <entity>
+                    <name>
+                        <simpleValue>IFCSPACE</simpleValue>
+                    </name>
+                </entity>
+            </applicability>
+            <requirements>
+                <property dataType="IFCLENGTHMEASURE" cardinality="required">
+                    <propertySet>
+                        <simpleValue>MY_FireSafety</simpleValue>
+                    </propertySet>
+                    <baseName>
+                        <simpleValue>MaxTravelDistance</simpleValue>
+                    </baseName>
+                </property>
+            </requirements>
+        </specification>
+        <specification name="Compartment wall fire rating" ifcVersion="IFC2X3 IFC4" identifier="MY-P08" description="Every wall marked as compartmentation has a fire resistance period." instructions="By-law 148 and Ninth Schedule. FireRating in minutes (e.g. 60, FRP 60 min) or hours (1 HR).">
+            <applicability minOccurs="0" maxOccurs="unbounded">
+                <entity>
+                    <name>
+                        <simpleValue>IFCWALL</simpleValue>
+                    </name>
+                </entity>
+                <property dataType="IFCBOOLEAN">
+                    <propertySet>
+                        <simpleValue>Pset_WallCommon</simpleValue>
+                    </propertySet>
+                    <baseName>
+                        <simpleValue>Compartmentation</simpleValue>
+                    </baseName>
+                    <value>
+                        <simpleValue>TRUE</simpleValue>
+                    </value>
+                </property>
+            </applicability>
+            <requirements>
+                <property dataType="IFCLABEL" cardinality="required">
+                    <propertySet>
+                        <simpleValue>Pset_WallCommon</simpleValue>
+                    </propertySet>
+                    <baseName>
+                        <simpleValue>FireRating</simpleValue>
+                    </baseName>
+                    <value>
+                        <xs:restriction base="xs:string">
+                            <xs:pattern value="(FRP ?)?(30|60|90|120|180|240) ?(min|mins|MIN)?|(FRP ?)?(1/2|1|1\.5|2|3|4) ?(hr|hrs|hour|hours|HR|HRS)" />
+                        </xs:restriction>
+                    </value>
+                </property>
+            </requirements>
+        </specification>
+        <specification name="Compartment slab fire rating" ifcVersion="IFC2X3 IFC4" identifier="MY-P09" description="Every slab marked as compartmentation has a fire resistance period." instructions="By-law 148 and Ninth Schedule. FireRating in minutes (e.g. 60, FRP 60 min) or hours (1 HR).">
+            <applicability minOccurs="0" maxOccurs="unbounded">
+                <entity>
+                    <name>
+                        <simpleValue>IFCSLAB</simpleValue>
+                    </name>
+                </entity>
+                <property dataType="IFCBOOLEAN">
+                    <propertySet>
+                        <simpleValue>Pset_SlabCommon</simpleValue>
+                    </propertySet>
+                    <baseName>
+                        <simpleValue>Compartmentation</simpleValue>
+                    </baseName>
+                    <value>
+                        <simpleValue>TRUE</simpleValue>
+                    </value>
+                </property>
+            </applicability>
+            <requirements>
+                <property dataType="IFCLABEL" cardinality="required">
+                    <propertySet>
+                        <simpleValue>Pset_SlabCommon</simpleValue>
+                    </propertySet>
+                    <baseName>
+                        <simpleValue>FireRating</simpleValue>
+                    </baseName>
+                    <value>
+                        <xs:restriction base="xs:string">
+                            <xs:pattern value="(FRP ?)?(30|60|90|120|180|240) ?(min|mins|MIN)?|(FRP ?)?(1/2|1|1\.5|2|3|4) ?(hr|hrs|hour|hours|HR|HRS)" />
+                        </xs:restriction>
+                    </value>
+                </property>
+            </requirements>
+        </specification>
+        <specification name="Door exit flag" ifcVersion="IFC2X3 IFC4" identifier="MY-P10" description="Every door says whether it is a fire exit." instructions="By-law 167-177: storey exits are counted and their widths summed.">
+            <applicability minOccurs="1" maxOccurs="unbounded">
+                <entity>
+                    <name>
+                        <simpleValue>IFCDOOR</simpleValue>
+                    </name>
+                </entity>
+            </applicability>
+            <requirements>
+                <property dataType="IFCBOOLEAN" cardinality="required">
+                    <propertySet>
+                        <simpleValue>Pset_DoorCommon</simpleValue>
+                    </propertySet>
+                    <baseName>
+                        <simpleValue>FireExit</simpleValue>
+                    </baseName>
+                </property>
+            </requirements>
+        </specification>
+        <specification name="Exit door width" ifcVersion="IFC2X3 IFC4" identifier="MY-P11" description="Every exit door has an overall width." instructions="By-law 176 and Seventh Schedule: exit capacity in 550 mm units of clear width.">
+            <applicability minOccurs="0" maxOccurs="unbounded">
+                <entity>
+                    <name>
+                        <simpleValue>IFCDOOR</simpleValue>
+                    </name>
+                </entity>
+                <property dataType="IFCBOOLEAN">
+                    <propertySet>
+                        <simpleValue>Pset_DoorCommon</simpleValue>
+                    </propertySet>
+                    <baseName>
+                        <simpleValue>FireExit</simpleValue>
+                    </baseName>
+                    <value>
+                        <simpleValue>TRUE</simpleValue>
+                    </value>
+                </property>
+            </applicability>
+            <requirements>
+                <attribute cardinality="required">
+                    <name>
+                        <simpleValue>OverallWidth</simpleValue>
+                    </name>
+                </attribute>
+            </requirements>
+        </specification>
+        <specification name="Fire door rating format" ifcVersion="IFC2X3 IFC4" identifier="MY-P12" description="A door fire rating, where given, is a fire resistance period." instructions="By-law 162-163: half-hour and one-hour doors.">
+            <applicability minOccurs="0" maxOccurs="unbounded">
+                <entity>
+                    <name>
+                        <simpleValue>IFCDOOR</simpleValue>
+                    </name>
+                </entity>
+                <property dataType="IFCLABEL">
+                    <propertySet>
+                        <simpleValue>Pset_DoorCommon</simpleValue>
+                    </propertySet>
+                    <baseName>
+                        <simpleValue>FireRating</simpleValue>
+                    </baseName>
+                </property>
+            </applicability>
+            <requirements>
+                <property dataType="IFCLABEL" cardinality="required">
+                    <propertySet>
+                        <simpleValue>Pset_DoorCommon</simpleValue>
+                    </propertySet>
+                    <baseName>
+                        <simpleValue>FireRating</simpleValue>
+                    </baseName>
+                    <value>
+                        <xs:restriction base="xs:string">
+                            <xs:pattern value="(FRP ?)?(30|60|90|120|180|240) ?(min|mins|MIN)?|(FRP ?)?(1/2|1|1\.5|2|3|4) ?(hr|hrs|hour|hours|HR|HRS)" />
+                        </xs:restriction>
+                    </value>
+                </property>
+            </requirements>
+        </specification>
+        <specification name="Stair exit flag" ifcVersion="IFC2X3 IFC4" identifier="MY-P13" description="Every stair says whether it is an escape stair." instructions="By-law 168 and 177: staircase number and width.">
+            <applicability minOccurs="0" maxOccurs="unbounded">
+                <entity>
+                    <name>
+                        <simpleValue>IFCSTAIR</simpleValue>
+                    </name>
+                </entity>
+            </applicability>
+            <requirements>
+                <property dataType="IFCBOOLEAN" cardinality="required">
+                    <propertySet>
+                        <simpleValue>Pset_StairCommon</simpleValue>
+                    </propertySet>
+                    <baseName>
+                        <simpleValue>FireExit</simpleValue>
+                    </baseName>
+                </property>
+            </requirements>
+        </specification>
+    </specifications>
+</ids>
