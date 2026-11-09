@@ -1,0 +1,304 @@
+# What a Bomba drawing set must show, per set and sheet type.
+#
+# Item lists follow the IPM Group guide "Lukisan Perlindungan Kebakaran Aktif
+# dan Pasif Bomba" (Lai Woon Fatt, 27 Jun 2022), cited as IPM <section> <n>,
+# with the UBBL 1984 by-law each item serves.
+#
+#   set:    passive | active
+#   sheet:  floor_plan | site_plan | general | schematic | any
+#   scope:  each  -> every sheet of that type must show it
+#           any   -> at least one sheet of that type in the set
+#   match:  regexes, case-insensitive, any one is enough (English and Malay)
+#   when:   only check if the project form says so
+#           sprinklered: true | min_top_floor_m: <m> | min_volume_m3: <m3>
+#   severity: error (rejection risk) | warning | info (where applicable)
+
+items:
+  # ---- passive, floor plans (IPM passive floor plan 1-17)
+  - id: P01
+    set: passive
+    sheet: floor_plan
+    scope: each
+    what: Floor area stated
+    match: ['floor area', 'keluasan lantai', '\bGFA\b', '\bNFA\b', '\d[\d,]*(\.\d+)?\s?(m2|m²|sq\.?\s?m)']
+    basis: IPM passive floor 1; UBBL by-law 135(b), 136
+    severity: error
+  - id: P02
+    set: passive
+    sheet: floor_plan
+    scope: each
+    what: Travel distance and dead ends marked
+    match: ['travel distance', 'jarak perjalanan', 'dead.?end', 'jalan mati', '\bT\.?D\.?\s*[=:]']
+    basis: IPM passive floor 2; UBBL by-law 165, Seventh Schedule
+    severity: error
+  - id: P03
+    set: passive
+    sheet: floor_plan
+    scope: each
+    what: Exit doors and staircases located
+    match: ['staircase', 'tangga', 'fire escape', '\bexit\b', 'keluar']
+    basis: IPM passive floor 3; UBBL by-law 167-168
+    severity: error
+  - id: P04
+    set: passive
+    sheet: floor_plan
+    scope: any
+    what: Fire-rated doors identified
+    match: ['fire door', 'fire.?rated door', '\bF\.?R\.?D\b', '\bFD\d*\b', 'pintu rintangan api']
+    basis: IPM passive floor 4; UBBL by-law 162-164
+    severity: error
+  - id: P05
+    set: passive
+    sheet: any
+    scope: any
+    what: Wall types and thickness (brick, gypsum)
+    match: ['brick ?wall', 'gypsum', 'dinding bata', 'dinding gipsum', 'wall type', '\d+\s?mm\s?(thk|thick)']
+    basis: IPM passive floor 5; UBBL Ninth Schedule
+    severity: warning
+  - id: P06
+    set: passive
+    sheet: any
+    scope: any
+    what: Structure fire resistance periods stated
+    match: ['\bFRP\b', 'fire resistance', 'rintangan api', '\d\s?(hr|hour|jam)\b']
+    basis: IPM passive floor 6; UBBL by-law 213-224, Ninth Schedule
+    severity: error
+  - id: P07
+    set: passive
+    sheet: floor_plan
+    scope: any
+    what: Compartment walls / fire breaks marked (in red)
+    match: ['compartment', 'fire break', 'separating wall', 'dinding pemisah', 'petak']
+    colour: red
+    basis: IPM passive floor 7; UBBL by-law 136, 147-148
+    severity: error
+  - id: P08
+    set: passive
+    sheet: floor_plan
+    scope: any
+    what: Locations needing special protection (sprinklers, protected lobby, fire shutter, detectors, pressurisation)
+    match: ['sprinkler', 'pemercik', 'protected lobby', 'lobi terlindung', 'smoke lobby', 'fire shutter', 'sesekat api', 'smoke detector', 'heat detector', 'pressuri[sz]']
+    basis: IPM passive floor 8; UBBL by-law 196-202, Tenth Schedule
+    severity: warning
+  - id: P09
+    set: passive
+    sheet: any
+    scope: any
+    what: Fixed extinguishing areas (CO2, FM200, aerosol) marked
+    match: ['\bCO2\b', 'FM.?200', 'aerosol', 'gas suppression', 'clean agent']
+    basis: IPM passive floor 9; UBBL by-law 235
+    severity: info
+  - id: P10
+    set: passive
+    sheet: any
+    scope: any
+    what: Full list of fire requirements (notes)
+    match: ['fire requirements', 'fire safety (notes|requirements)', 'kehendak.?kehendak bomba', 'keperluan kebakaran', 'nota (keselamatan )?kebakaran']
+    basis: IPM passive floor 10
+    severity: error
+  - id: P11
+    set: passive
+    sheet: floor_plan
+    scope: each
+    what: Portable fire extinguishers
+    match: ['extinguisher', 'alat pemadam', '\bP?FE\d*\b']
+    basis: IPM passive floor 11; UBBL by-law 227
+    severity: error
+  - id: P12
+    set: passive
+    sheet: floor_plan
+    scope: each
+    what: Emergency lights
+    match: ['emergency light', 'lampu kecemasan', '\bEL\d*\b', 'emergency lighting']
+    basis: IPM passive floor 12; UBBL by-law 253, Tenth Schedule
+    severity: error
+  - id: P13
+    set: passive
+    sheet: floor_plan
+    scope: each
+    what: Exit signs
+    match: ['exit sign', 'keluar', '\bKS\d*\b', 'tanda keluar']
+    basis: IPM passive floor 13; UBBL by-law 172
+    severity: error
+  - id: P14
+    set: passive
+    sheet: floor_plan
+    scope: any
+    what: Breeching inlet, wet and dry riser locations
+    match: ['breeching inlet', '\bBI\d*\b', 'dry riser', 'wet riser', 'pancur (basah|kering)']
+    when: {min_top_floor_m: 18.3}
+    basis: IPM passive floor 14; UBBL by-law 229-231
+    severity: error
+  - id: P15
+    set: passive
+    sheet: floor_plan
+    scope: each
+    what: Hose reels, break glass and alarm bells
+    match: ['hose reel', 'kekili hos', '\bHR\d*\b']
+    also: ['break ?glass', 'pecah kaca', '\bBG\d*\b', 'manual call point', 'alarm bell', 'loceng', '\bAB\d*\b']
+    basis: IPM passive floor 15; UBBL by-law 225(1), 237, Tenth Schedule
+    severity: error
+  - id: P16
+    set: passive
+    sheet: floor_plan
+    scope: any
+    what: Fire intercom positions
+    match: ['intercom', 'interkom', 'fireman.?s? (telephone|phone)']
+    when: {min_top_floor_m: 30.5}
+    basis: IPM passive floor 16; UBBL by-law 239
+    severity: error
+  - id: P17
+    set: passive
+    sheet: floor_plan
+    scope: any
+    what: Fire lift
+    match: ['fire lift', 'fireman.?s? lift', 'lif bomba', 'lif kebakaran', '\bFL\d*\b']
+    when: {min_top_floor_m: 18.3}
+    basis: IPM passive floor 17; UBBL by-law 229(5), 243
+    severity: error
+
+  # ---- passive, site plan (IPM passive site 1-4)
+  - id: PS1
+    set: passive
+    sheet: site_plan
+    scope: any
+    what: Fire hydrants along the appliance access route
+    match: ['hydrant', 'pili bomba', '\bF?H\d+\b']
+    basis: IPM passive site 1; UBBL by-law 225(2)-(3)
+    severity: error
+  - id: PS2
+    set: passive
+    sheet: site_plan
+    scope: any
+    what: Breeching inlet near a hydrant
+    match: ['breeching inlet', '\bBI\d*\b']
+    when: {min_top_floor_m: 18.3}
+    basis: IPM passive site 2; UBBL by-law 230-231
+    severity: error
+  - id: PS4
+    set: passive
+    sheet: site_plan
+    scope: any
+    what: Fire appliance access route (in yellow)
+    match: ['fire (engine|appliance|tender) access', 'laluan (jentera )?bomba', 'jalan masuk bomba', 'access road', 'fire path']
+    colour: yellow
+    basis: IPM passive site 4; UBBL by-law 140
+    severity: error
+
+  # ---- passive, general information (IPM general 1-3)
+  - id: PG1
+    set: passive
+    sheet: any
+    scope: any
+    what: Fire requirements endorsed under the Perakuan (architect / engineer declaration)
+    match: ['perakuan', 'hereby (certify|declare)', 'certification']
+    basis: IPM general 1
+    severity: error
+  - id: PG2
+    set: passive
+    sheet: any
+    scope: any
+    what: Occupancy load calculation table
+    match: ['occupan(t|cy) load', 'beban penghuni']
+    basis: IPM general 2; UBBL by-law 175-177, Seventh Schedule
+    severity: error
+  - id: PG3
+    set: passive
+    sheet: any
+    scope: any
+    what: Fire appliance access calculation
+    match: ['fire appliance access', 'akses perkakas bomba', 'appliance access calculation', 'perimeter (abutting|accessible)']
+    when: {min_volume_m3: 7000}
+    basis: IPM general 3; UBBL by-law 140
+    severity: error
+
+  # ---- active, floor plans (IPM active floor 1-4)
+  - id: A02
+    set: active
+    sheet: floor_plan
+    scope: any
+    what: Pipework from pump room and pressure valves to hose reel and sprinkler systems
+    match: ['pump room', 'bilik pam', 'pressure (reducing )?valve', 'injap', '\bPRV\b', 'riser pipe']
+    basis: IPM active floor 2; UBBL by-law 247-248
+    severity: error
+  - id: A03
+    set: active
+    sheet: floor_plan
+    scope: any
+    what: Heat / smoke detector wiring with exact locations
+    match: ['smoke detector', 'heat detector', 'pengesan (asap|haba)', '\bSD\d*\b', '\bHD\d*\b']
+    basis: IPM active floor 3; UBBL by-law 225(1), Tenth Schedule
+    severity: warning
+  - id: A04
+    set: active
+    sheet: floor_plan
+    scope: each
+    what: Sprinkler heads and branch pipes with exact locations
+    match: ['sprinkler', 'pemercik']
+    when: {sprinklered: true}
+    basis: IPM active floor 4; UBBL by-law 225(1), 228
+    severity: error
+
+  # ---- active, site plan (IPM active site 1-3)
+  - id: AS2
+    set: active
+    sheet: site_plan
+    scope: any
+    what: External pipework from meter to sprinkler / hydrant tank, pumps and pressure valves
+    match: ['meter', 'tank', 'tangki']
+    basis: IPM active site 2; UBBL by-law 247
+    severity: error
+  - id: AS3
+    set: active
+    sheet: site_plan
+    scope: any
+    what: Connection to the external hydrant main
+    match: ['hydrant main', 'hydrant (pipe|ring)', 'paip pili', '\bH\d+\b']
+    basis: IPM active site 3; UBBL by-law 225(2)
+    severity: error
+
+  # ---- active, other drawings (IPM active other 1-3)
+  - id: AO1
+    set: active
+    sheet: schematic
+    scope: any
+    what: Sprinkler, hydrant and hose reel schematics with full specification schedule
+    match: ['hose reel', 'kekili hos']
+    also: ['schedule', 'jadual', 'specification', 'spesifikasi']
+    basis: IPM active other 1
+    severity: error
+  - id: AO2
+    set: active
+    sheet: schematic
+    scope: any
+    what: Fire intercom panel schematic
+    match: ['intercom', 'interkom']
+    when: {min_top_floor_m: 30.5}
+    basis: IPM active other 2; UBBL by-law 239
+    severity: error
+  - id: AO3
+    set: active
+    sheet: schematic
+    scope: any
+    what: Main fire alarm control panel schematic
+    match: ['fire alarm (control )?panel', '\bM?FACP\b', 'panel kawalan penggera', 'main alarm panel']
+    basis: IPM active other 3; UBBL by-law 237
+    severity: error
+
+# Tags compared between the passive and active sets, sheet by sheet.
+# IPM: "inconsistency between passive and active drawings causes the
+# application to fail".
+tags:
+  fire_door: '\bF\.?R?\.?D\s?-?\d+[A-Z]?\b'
+  hydrant: '\bF?H\s?-?\d+\b'
+  breeching_inlet: '\bBI\s?-?\d+\b'
+  hose_reel: '\bHR\s?-?\d+\b'
+  extinguisher: '\bP?FE\s?-?\d+\b'
+  staircase: '\bST(AIR)?\s?-?\d+\b'
+  fire_lift: '\bFL\s?-?\d+\b'
+
+# Ramp gradients (IPM passive site 3): 1:12, 1:15 in Selangor.
+ramp:
+  default: 12
+  by_state: {selangor: 15}
+  basis: IPM passive site 3
