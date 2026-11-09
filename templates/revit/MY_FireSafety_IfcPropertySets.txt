@@ -1,0 +1,29 @@
+#
+# Revit IFC exporter: user defined property sets for the IFC-MY fire rule pack.
+# Load in IFC Export Setup > Property Sets > "Export user defined property sets".
+# Format: PropertySet:<tab><name><tab>I|T<tab><IFC classes>, then <tab><IFC property><tab><type>[<tab><Revit parameter>]
+#
+PropertySet:	MY_FireSafety	I	IfcBuilding
+	PurposeGroup	Label
+	SubUse	Label
+	BuildingHeight	Length
+PropertySet:	MY_FireSafety	I	IfcSpace
+	CompartmentId	Label
+	MaxTravelDistance	Length
+	DeadEndDistance	Length
+	OccupancyUse	Label
+PropertySet:	Pset_BuildingCommon	I	IfcBuilding
+	SprinklerProtectionAutomatic	Boolean
+PropertySet:	Pset_WallCommon	I	IfcWall
+	Compartmentation	Boolean
+	FireRating	Label	Fire Rating
+PropertySet:	Pset_SlabCommon	I	IfcSlab
+	Compartmentation	Boolean
+	FireRating	Label	Fire Rating
+PropertySet:	Pset_DoorCommon	I	IfcDoor
+	FireExit	Boolean
+	FireRating	Label	Fire Rating
+PropertySet:	Pset_StairCommon	I	IfcStair
+	FireExit	Boolean
+PropertySet:	Pset_TransportElementElevator	I	IfcTransportElement
+	FireFightingLift	Boolean

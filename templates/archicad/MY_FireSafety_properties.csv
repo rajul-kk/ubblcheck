@@ -1,0 +1,13 @@
+Property group,Property,Type,Applies to,IFC property set,IFC type,Basis
+MY_FireSafety,PurposeGroup,"Option set: I,II,III,IV,V,VI,VII,VIII",Project / building,MY_FireSafety,IfcLabel,By-law 134
+MY_FireSafety,SubUse,String,Project / building,MY_FireSafety,IfcLabel,Seventh Schedule
+MY_FireSafety,BuildingHeight,Length,Project / building,MY_FireSafety,IfcLengthMeasure,By-law 135(a)
+MY_FireSafety,CompartmentId,String,Zone,MY_FireSafety,IfcLabel,By-law 136
+MY_FireSafety,MaxTravelDistance,Length,Zone,MY_FireSafety,IfcLengthMeasure,By-law 165
+MY_FireSafety,DeadEndDistance,Length,Zone,MY_FireSafety,IfcLengthMeasure,Seventh Schedule
+MY_FireSafety,OccupancyUse,String,Zone,MY_FireSafety,IfcLabel,By-law 175
+(built-in IFC),Compartmentation,Boolean,"Wall, slab",Pset_WallCommon / Pset_SlabCommon,IfcBoolean,By-law 148
+(built-in IFC),FireRating,String,"Wall, slab, door",Pset_*Common,IfcLabel,"By-law 162, Ninth Schedule"
+(built-in IFC),FireExit,Boolean,"Door, stair",Pset_DoorCommon / Pset_StairCommon,IfcBoolean,By-law 167-177
+(built-in IFC),SprinklerProtectionAutomatic,Boolean,Building,Pset_BuildingCommon,IfcBoolean,By-law 136
+(built-in IFC),FireFightingLift,Boolean,Lift (object),Pset_TransportElementElevator,IfcBoolean,By-law 229(5)
