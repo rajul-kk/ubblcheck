@@ -3,8 +3,9 @@
 The IDS pass checks the model *carries* the data; the rule pass checks the
 data *complies*: compartment sizes (Fifth Schedule), declared travel distances,
 occupant load against exit capacity (Seventh Schedule), compartment floors
-above 30 m (by-law 137), fire door ratings (by-law 162), and the fire-fighting
-systems the building height or sprinkler flag calls for (by-law 229-231).
+above 30 m (by-law 137), fire door ratings (by-law 162), element fire resistance
+(Ninth Schedule), and the fire-fighting systems the building height or sprinkler
+flag calls for (by-law 229-231).
 """
 from __future__ import annotations
 
@@ -149,7 +150,107 @@ def check_rules(model: ifcopenshell.file) -> list[Finding]:
     out += _exits(f)
     out += _compartment_floors(f, height)
     out += _fire_doors(f)
+    out += _ninth(f, height)
     out += _systems(f)
+    return out
+
+
+def _space_area(f: Facts, sp) -> float:
+    a = f.area(sp)
+    if a is None:
+        from . import geom
+        fp = geom.footprint(geom.mesh(sp))
+        a = fp.area if fp is not None else 0.0
+    return a
+
+
+def _space_volume(f: Facts, sp) -> float | None:
+    v = f.volume(sp)
+    if v is None:
+        from . import geom
+        v = geom.volume(geom.mesh(sp))
+    return v
+
+
+def dimensions(f: Facts) -> dict:
+    """Storey areas and volumes for the schedule look-ups.
+
+    Returns the largest storey area and largest volume of any compartment (or of the
+    building, when no space carries a CompartmentId), the area of each storey, the total
+    floor area, and the number of storeys at or above ground."""
+    st_area = defaultdict(float)
+    comp_area = defaultdict(float)
+    comp_vol = defaultdict(float)
+    total_vol = 0.0
+    for sp in f.model.by_type("IfcSpace"):
+        st = f.storey_of(sp)
+        if st is None:
+            continue
+        a = _space_area(f, sp)
+        v = _space_volume(f, sp) or 0.0
+        st_area[st.id()] += a
+        total_vol += v
+        cid = _prop(sp, PSET, "CompartmentId")
+        if cid is not None:
+            comp_area[(cid, st.id())] += a
+            comp_vol[cid] += v
+    above = [s for s in f.storeys if f.elev(s) >= -1.0]
+    by_comp = bool(comp_area)
+    return {
+        "storey_area": dict(st_area),
+        "floor_area": max(comp_area.values() if by_comp else st_area.values(), default=0.0),
+        "volume": max(comp_vol.values(), default=0.0) if by_comp else total_vol,
+        "total_area": sum(st_area[s.id()] for s in above),
+        "storeys": len(above),
+        "basis": "largest compartment" if by_comp else "building",
+    }
+
+
+# element class -> (common pset, kind)
+_STRUCTURE = {"IfcColumn": ("Pset_ColumnCommon", "column"), "IfcBeam": ("Pset_BeamCommon", "beam"),
+              "IfcSlab": ("Pset_SlabCommon", "floor"), "IfcWall": ("Pset_WallCommon", "wall")}
+
+
+def _ninth(f: Facts, height):
+    out = []
+    d = dimensions(f)
+    if not d["storey_area"]:
+        return out
+    req = ubbl.fire_resistance(f.group, height, d["floor_area"], d["volume"], d["storeys"], f.sprinklered)
+    if req is None:
+        return [Finding("IFC-FRP-SIZE", "info",
+                        f"{d['basis'].capitalize()} ({d['floor_area']:.0f} m2 storey, {d['volume']:.0f} m3) is larger "
+                        f"than every Ninth Schedule line for group {f.group} at {height:.1f} m; it must be "
+                        "compartmented (see IFC-COMP-AREA / IFC-COMP-VOL), so element periods are not checked",
+                        ubbl.NINTH_CLAUSE, [])]
+    basements = {s.id() for s in f.storeys if f.elev(s) < -1.0}
+    ground = min((s for s in f.storeys if f.elev(s) >= -1.0), key=f.elev, default=None)
+    over_basement = ground.id() if (basements and ground is not None) else None
+    short = defaultdict(list)
+    for cls, (ps, kind) in _STRUCTURE.items():
+        for el in f.model.by_type(cls):
+            if cls == "IfcSlab" and (el.PredefinedType or "") not in ("FLOOR", "BASESLAB", "NOTDEFINED", ""):
+                continue
+            if cls == "IfcWall" and not (_prop(el, ps, "LoadBearing") is True or _prop(el, ps, "Compartmentation") is True):
+                continue
+            st = f.storey_of(el)
+            if st is None:
+                continue
+            have = frp_minutes(_prop(el, ps, "FireRating"))
+            if have is None:
+                continue        # missing ratings are reported by the IDS pack
+            base = st.id() in basements or (kind == "floor" and st.id() == over_basement)
+            barea = d["storey_area"].get(st.id()) if st.id() in basements else None
+            need = ubbl.element_frp(req, kind, base, _prop(el, ps, "Compartmentation") is True, barea)
+            if have < need:
+                short[(st.Name, kind, need)].append((el, have))
+    for (storey, kind, need), els in sorted(short.items(), key=lambda kv: (str(kv[0][0]), kv[0][1])):
+        worst = min(h for _, h in els)
+        out.append(Finding("IFC-FRP", "error",
+                           f"{storey}: {len(els)} {kind}(s) below the {need} min the "
+                           f"Ninth Schedule requires (lowest {worst} min; {req.line}; {d['basis']})", req.clause,
+                           [e.GlobalId for e, _ in els],
+                           {"required_min": need, "lowest_min": worst, "line": req.line, "basis": d["basis"]}))
     return out
 
 

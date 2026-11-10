@@ -67,6 +67,9 @@ complies:
 - travel distances and occupant load against exit width (Seventh Schedule);
 - compartment floors above 30 m (by-law 137);
 - fire doors in compartment walls (by-law 162);
+- fire resistance of columns, beams, floors and loadbearing or compartment walls
+  against the Ninth Schedule line for the building's group, height, storey area and
+  volume (by-law 142), including the basement column and notes (a)-(c);
 - rising mains and a fire lift above 18.3 m (by-law 229–231).
 
 It also measures from the geometry instead of trusting declared values:
@@ -104,13 +107,18 @@ the property mapping are in [`docs/ifc-my.md`](docs/ifc-my.md).
   in `checklist.yaml`; every item lists its own.
 - **Colour is detected from vector stroke and fill.** Hatches drawn as
   images are not seen.
-- **Tenth and Ninth Schedules are not yet tables.** Which active systems a
-  building class needs, and element FRP by height, are partly encoded as
-  conditions (height, sprinklers) and not in full.
+- **The Tenth Schedule is not yet a table.** Which active systems a building
+  class needs is partly encoded as conditions (height, sprinklers).
+- **Ninth Schedule periods use the largest compartment.** When spaces carry
+  `CompartmentId`, the storey area and volume of the largest compartment pick the
+  line for every element, so an element in a smaller compartment may be held to a
+  longer period than it needs. Part 2 of the Ninth Schedule's specification tables
+  (notional periods of materials) is not encoded.
 - **The IFC pack's custom property set is provisional.** `MY_FireSafety`
   should be aligned with the CIDB NBeS IFC guideline, which is not public.
 - **One possible misprint in the source.** In the JKR text, the Shops
-  travel-distance row looks transposed (see `ubbl.ERRATA`).
+  travel-distance row looks transposed. Three Ninth Schedule cells are garbled in
+  the same text. Each value used is listed in `ubbl.ERRATA`.
 - **Not yet tried on a real submission set.** The PDF checker has only seen
   the synthetic sets in `tests/`. The IFC checker has run on the
   buildingSMART `Building-Architecture.ifc` sample, a SketchUp export with

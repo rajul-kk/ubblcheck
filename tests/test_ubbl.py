@@ -58,3 +58,30 @@ def test_fire_appliance_access_scale():
     assert ubbl.access_perimeter_share(7001) == pytest.approx(1 / 6)
     assert ubbl.access_perimeter_share(30000) == pytest.approx(1 / 4)
     assert ubbl.access_perimeter_share(200000) == 1.0
+
+
+def test_ninth_schedule_lines():
+    # office 8 m high, 400 m2 storeys, 1 400 m3: third line (15 m, 3 500 m3), 1(b) and 1 hour
+    r = ubbl.fire_resistance("IV", 8, 400, 1400, storeys=2)
+    assert (r.above_min, r.basement_min) == (60, 60) and "b" in r.marks
+    # low small office: first line, none above ground, 1 hour below
+    assert ubbl.fire_resistance("IV", 6, 200, 900, storeys=2).above_min == 0
+    # tall office: last line
+    assert ubbl.fire_resistance("IV", 60, 9000, 50000, storeys=15).above_min == 90
+    # shop over every line unless sprinklered (y doubles the last line)
+    assert ubbl.fire_resistance("V", 40, 2400, 9000, storeys=10) is None
+    assert ubbl.fire_resistance("V", 40, 2400, 9000, storeys=10, sprinklered=True).above_min == 120
+    # small residential: the storey count picks the line
+    assert ubbl.fire_resistance("I", 9, 120, 900, storeys=3).above_min == 30
+    assert ubbl.fire_resistance("I", 12, 200, 900, storeys=4).above_min == 60
+
+
+def test_ninth_schedule_single_storey_and_notes():
+    assert ubbl.fire_resistance("VIII", 6, 800, 5000, storeys=1).above_min == 60
+    assert ubbl.fire_resistance("II", 6, 3500, 20000, storeys=1) is None
+    r = ubbl.fire_resistance("IV", 8, 400, 1400, storeys=2)
+    assert ubbl.element_frp(r, "floor", False, compartment_floor=False) == 30    # note (b)
+    assert ubbl.element_frp(r, "beam", False, compartment_floor=False) == 60
+    low = ubbl.fire_resistance("IV", 6, 200, 900, storeys=2)
+    assert ubbl.element_frp(low, "column", True) == 60
+    assert ubbl.element_frp(low, "column", True, basement_area_m2=40) == 0       # note (c)

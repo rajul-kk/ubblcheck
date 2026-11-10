@@ -1,7 +1,7 @@
 """UBBL 1984 fire tables as data.
 
 Values are transcribed from the JKR consolidated text of the Uniform Building
-By-Laws 1984 (Fifth and Seventh Schedules, by-laws 134-177).  Each table keeps
+By-Laws 1984 (Fifth, Seventh, Ninth and Tenth Schedules, by-laws 134-177).  Each table keeps
 the clause it came from so a finding can cite it.  Where the consolidated text
 looks like a transcription slip the value used here is noted in ERRATA so a
 reviewer can check it against the gazetted copy of the state in question.
@@ -93,6 +93,17 @@ TRAVEL = {
 DEFAULT_USE = {"II": "II.hospital", "III": "III.flat", "VI": "VI.general", "VIII": "VIII.low_ordinary"}
 
 ERRATA = {
+    "NINTH.V.1": "Ninth Schedule Part 1, first Shop line: the JKR text prints the floor area as "
+                 "'1 150'; 150 m2 is used, which fits the 7.5 m / 500 m2 line below it.",
+    "NINTH.VI.2": "Ninth Schedule Part 1, second Factory line, and Part 2, first Factory line: the "
+                  "period prints as '?'; half an hour is used, as in the matching lines of other groups.",
+    "NINTH.VII.3": "Ninth Schedule Part 1, third Assembly line: the period prints as '(b)'; 1(b) is "
+                   "used, as in the matching Office line.",
+    "TENTH.II.edu.d": "Tenth Schedule, educational buildings of 11 storeys and above: the "
+                      "extinguishing column prints '---'; hose reels (G) are required here, as for "
+                      "6 to 10 storeys.",
+    "TENTH.VIII.gap": "Tenth Schedule, single-storey general storage: no line covers 500 m2 to "
+                      "1 400 m3; the 250-500 m2 line (G, 2) is used.",
     "V": "JKR text prints the Shops row as 15 / 60 / 45 (sprinklered below unsprinklered, "
          "unlike every other row); 45 / 60 is used here. Check the gazetted state copy.",
 }
@@ -200,3 +211,123 @@ DIRECT_DISTANCE_FRACTION = 2 / 3    # by-law 165(1)
 ROOM_TRAVEL_M = 15                  # by-law 165(3)
 FIRE_DOOR_FRP_MIN = (30, 60, 120, 240)  # minutes, by-law 162-163 and Ninth Schedule
 MIN_EXITS = 2                        # by-law 177(d)
+
+
+# ---------------------------------------------------------------- Ninth Schedule
+# Minimum periods of fire resistance for elements of structure (by-law 142(3), 147,
+# 158(1), 162, 213, 216(2)).  Part 1, buildings other than single storey:
+# (group, max_storeys, height_m, floor_area_m2, volume_m3, above_hours, basement_hours, marks)
+# height: the line applies to buildings not exceeding it; "over 28" is no limit.
+# floor area: of each storey of the building, or of the compartment the element is in;
+# volume: of the building, or of that compartment.  The first line all three fit applies.
+# marks: (a)-(c) are the notes below; x = buildings only (not compartments) except group
+# III; y = limits in the area and volume columns double when sprinklered throughout.
+_NINTH_1 = [
+    ("I", 3, INF, INF, INF, 0.5, 1.0, "a x"),
+    ("I", 4, INF, 250, INF, 1.0, 1.0, "b x"),
+    ("I", None, INF, INF, INF, 1.0, 1.5, ""),
+    ("II", None, 28, 2000, INF, 1.0, 1.5, ""),
+    ("II", None, INF, 2000, INF, 1.5, 2.0, ""),
+    ("III", 2, INF, 500, INF, 0.5, 1.0, "x"),
+    ("III", 3, INF, 250, INF, 1.0, 1.0, "b"),
+    ("III", None, 28, 3000, 8500, 1.0, 1.5, ""),
+    ("III", None, INF, 2000, 5500, 1.5, 2.0, ""),
+    ("IV", None, 7.5, 250, INF, 0.0, 1.0, "c x"),
+    ("IV", None, 7.5, 500, INF, 0.5, 1.0, ""),
+    ("IV", None, 15, INF, 3500, 1.0, 1.0, "b"),
+    ("IV", None, 28, 5000, 14000, 1.0, 1.5, ""),
+    ("IV", None, INF, INF, INF, 1.5, 2.0, ""),
+    ("V", None, 7.5, 150, INF, 0.0, 1.0, "c x"),        # ERRATA NINTH.V.1
+    ("V", None, 7.5, 500, INF, 0.5, 1.0, ""),
+    ("V", None, 15, INF, 3500, 1.0, 1.0, "b"),
+    ("V", None, 28, 1000, 7000, 1.0, 2.0, ""),
+    ("V", None, INF, 2000, 7000, 2.0, 4.0, "y"),
+    ("VI", None, 7.5, 250, INF, 0.0, 1.0, "c x"),
+    ("VI", None, 7.5, INF, 1700, 0.5, 1.0, ""),         # ERRATA NINTH.VI.2
+    ("VI", None, 15, INF, 4250, 1.0, 1.0, "b"),
+    ("VI", None, 28, INF, 8500, 1.0, 2.0, ""),
+    ("VI", None, 28, INF, 28000, 2.0, 4.0, ""),
+    ("VI", None, INF, 2000, 5500, 2.0, 4.0, ""),
+    ("VII", None, 7.5, 250, INF, 0.0, 1.0, "c x"),
+    ("VII", None, 7.5, 500, INF, 0.5, 1.0, ""),
+    ("VII", None, 15, INF, 3500, 1.0, 1.0, "b"),        # ERRATA NINTH.VII.3
+    ("VII", None, 28, 5000, 14000, 1.0, 1.5, ""),
+    ("VII", None, INF, INF, INF, 1.5, 2.0, ""),
+    ("VIII", None, 7.5, 150, INF, 0.0, 1.0, "c x"),
+    ("VIII", None, 7.5, 300, INF, 0.5, 1.0, ""),
+    ("VIII", None, 15, INF, 1700, 1.0, 1.0, "b"),
+    ("VIII", None, 15, INF, 3500, 1.0, 2.0, ""),
+    ("VIII", None, 28, INF, 7000, 2.0, 4.0, ""),
+    ("VIII", None, 28, INF, 21000, 4.0, 4.0, ""),
+    ("VIII", None, INF, 1000, INF, 4.0, 4.0, ""),
+]
+# Part 2, single storey buildings: (group, floor_area_m2, hours)
+_NINTH_2 = [
+    ("I", INF, 0.5), ("II", 3000, 0.5), ("III", 3000, 0.5),
+    ("IV", 3000, 0.5), ("IV", INF, 1.0),
+    ("V", 2000, 0.5), ("V", 3000, 1.0), ("V", INF, 2.0),
+    ("VI", 2000, 0.5), ("VI", 3000, 1.0), ("VI", INF, 2.0),   # ERRATA NINTH.VI.2
+    ("VII", 3000, 0.5), ("VII", INF, 1.0),
+    ("VIII", 500, 0.5), ("VIII", 1000, 1.0), ("VIII", 3000, 2.0), ("VIII", INF, 4.0),
+]
+NINTH_CLAUSE = "UBBL by-law 142(2), Ninth Schedule"
+
+
+@dataclass(frozen=True)
+class FireResistance:
+    above_min: int          # ground and upper storeys
+    basement_min: int       # basement storeys, and the floor over a basement
+    marks: str              # notes (a)-(c), x, y of the line used
+    line: str               # the line, for the report
+
+    @property
+    def clause(self) -> str:
+        return NINTH_CLAUSE
+
+
+def _fmt(v):
+    return "no limit" if v == INF else f"{v:g}"
+
+
+def fire_resistance(group: str, height_m: float, floor_area_m2: float, volume_m3: float,
+                    storeys: int = 2, sprinklered: bool = False) -> FireResistance | None:
+    """Minimum FRP for elements of structure, or None if the building (or compartment)
+    is larger than every line for its group, which means it has to be compartmented.
+
+    storeys: storeys at or above ground; 1 selects Part 2 (single storey buildings)."""
+    if storeys <= 1:
+        for g, area, hrs in _NINTH_2:
+            if g == group and floor_area_m2 <= area:
+                m = int(round(hrs * 60))
+                return FireResistance(m, m, "", f"Part 2: {group}, floor area up to {_fmt(area)} m2")
+        return None
+    for g, nst, h, area, vol, up, base, marks in _NINTH_1:
+        if g != group or (nst is not None and storeys > nst):
+            continue
+        k = 2 if sprinklered and "y" in marks else 1
+        if height_m <= h and floor_area_m2 <= area * k and volume_m3 <= vol * k:
+            line = (f"Part 1: {group}" + (f", up to {nst} storeys" if nst else "")
+                    + f", height {_fmt(h)} m, floor area {_fmt(area * k)} m2, volume {_fmt(vol * k)} m3")
+            return FireResistance(int(round(up * 60)), int(round(base * 60)), marks, line)
+    return None
+
+
+def element_frp(req: FireResistance, kind: str, basement: bool, compartment_floor: bool = True,
+                basement_area_m2: float | None = None) -> int:
+    """Required minutes for one element.  kind: 'floor', 'beam', 'column' or 'wall'.
+
+    Note (b): a floor that is not a compartment floor needs only half an hour (its
+    beams still need the full period).  Notes (a), (c): a basement of 50 m2 or less
+    needs half an hour, or none."""
+    if basement:
+        m = req.basement_min
+        if basement_area_m2 is not None and basement_area_m2 <= 50:
+            if "c" in req.marks:
+                m = 0
+            elif "a" in req.marks:
+                m = 30
+        return m
+    m = req.above_min
+    if kind == "floor" and "b" in req.marks and not compartment_floor:
+        m = min(m, 30)
+    return m

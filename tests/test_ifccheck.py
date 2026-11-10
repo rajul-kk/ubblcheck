@@ -74,6 +74,14 @@ def test_weaker_door_than_wall_is_a_warning(write):
     assert {f.rule: f.severity for f in fs} == {"IFC-FIREDOOR-WALL": "warning"}
 
 
+def test_element_fire_resistance_from_ninth_schedule(write):
+    fs = ifccheck.check(write(ifcmodel.office(wall_frp="30", door_frp="30")))
+    frp = [f for f in fs if f.rule == "IFC-FRP"]
+    assert len(frp) == 2 and all(f.detail["required_min"] == 60 for f in frp)
+    big = ifcmodel.office(storeys=10, space_area=1200, comp_split=False, group="V")
+    assert rules(ifccheck.check(write(big)))["IFC-FRP-SIZE"] == 1
+
+
 def test_high_building_with_riser_and_lift(write):
     m = ifcmodel.office(storeys=7, fire_lift=True, breeching=True)
     assert rules(ifccheck.check(write(m)))["IFC-RISER"] == 0
