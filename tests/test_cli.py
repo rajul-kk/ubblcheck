@@ -37,3 +37,18 @@ def test_form_template(tmp_path):
     assert "purpose_group" in f.read_text()
     assert cli.main(["form", str(f)]) == 2
 
+
+def test_ifc_command_runs_geometry(tmp_path):
+    import geomodel as G
+    md = G.Model()
+    st = md.storey("L0", 0.0)
+    G.box_floor(md, st, 60, 20, exits=((0, 2.0),))
+    p = tmp_path / "g.ifc"
+    md.m.write(str(p))
+    assert cli.main(["ifc", str(p), "-o", str(tmp_path / "o"), "--heatmaps"]) == 1
+    j = json.loads((tmp_path / "o" / "g.json").read_text(encoding="utf-8"))
+    assert "GEO-TRAVEL" in {f["rule"] for f in j["findings"]}
+    assert list((tmp_path / "o" / "heatmaps").glob("*.png"))
+    cli.main(["ifc", str(p), "-o", str(tmp_path / "o2"), "--no-geometry"])
+    j = json.loads((tmp_path / "o2" / "g.json").read_text(encoding="utf-8"))
+    assert not any(f["rule"].startswith("GEO-") for f in j["findings"])

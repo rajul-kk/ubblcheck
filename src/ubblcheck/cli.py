@@ -1,4 +1,4 @@
-"""ubblcheck ifc MODEL.ifc [-o OUT]       IFC model: IDS rule pack + UBBL rules -> BCF, JSON, PDF
+"""ubblcheck ifc MODEL.ifc [-o OUT]       IFC model: IDS rule pack, UBBL rules, geometric rules -> BCF, JSON, PDF
 ubblcheck pdf PROJECT.yaml [-o OUT]     2D drawing set(s) named in a project form -> JSON, PDF
 ubblcheck ids [DIR]                     write the IFC-MY IDS files
 ubblcheck form [FILE]                   write a blank project form
@@ -53,6 +53,9 @@ def main(argv=None):
     a.add_argument("-o", "--out", default="out")
     a.add_argument("--ids", nargs="*", help="IDS files (default: packaged pack)")
     a.add_argument("--no-rules", action="store_true", help="IDS only")
+    a.add_argument("--no-geometry", action="store_true", help="skip geometric rules (travel, access, ...)")
+    a.add_argument("--cell", type=float, default=0.2, help="travel grid cell in metres (default 0.2)")
+    a.add_argument("--heatmaps", action="store_true", help="write a travel-distance PNG per storey")
     b = sub.add_parser("pdf")
     b.add_argument("form")
     b.add_argument("-o", "--out", default="out")
@@ -79,6 +82,11 @@ def main(argv=None):
     if args.cmd == "ifc":
         from . import ifccheck
         fs = ifccheck.check(args.model, args.ids, rules=not args.no_rules)
+        if not args.no_rules and not args.no_geometry:
+            import ifcopenshell
+            from . import georules
+            heat = _out(args, "heatmaps") if args.heatmaps else None
+            fs += georules.check(ifcopenshell.open(args.model), heat_dir=heat, cell=args.cell)
         stem = os.path.splitext(os.path.basename(args.model))[0]
         n = fnd.to_bcf(fs, _out(args, stem + ".bcf"))
         print(f"  {_out(args, stem + '.bcf')} ({n} topics)")

@@ -56,6 +56,7 @@ text layer. Scanned pages are reported as unchecked.
 
 ```
 ubblcheck ifc model.ifc -o out       # out/model.bcf, out/model.json, out/model-report.pdf
+ubblcheck ifc model.ifc -o out --heatmaps    # plus out/heatmaps/travel-<storey>.png
 ```
 
 This runs the IDS files in `src/ubblcheck/ids/`, which check that the model
@@ -67,6 +68,18 @@ complies:
 - compartment floors above 30 m (by-law 137);
 - fire doors in compartment walls (by-law 162);
 - rising mains and a fire lift above 18.3 m (by-law 229–231).
+
+It also measures from the geometry instead of trusting declared values:
+
+- walking travel distance to the storey exits, following by-law 165(1)
+  (0.3 m clearance round walls, start 0.3 m from the remote point);
+- the share of the perimeter on a 12 m fire appliance access (by-law 140);
+- hydrant distance from that access (by-law 225(2));
+- the purpose group implied by room names, compared with the declared one;
+- mixed-use compartments (by-law 138(c)).
+
+`--heatmaps` writes a travel-distance map per storey. The method and its
+tolerance are in [`docs/geometric-rules.md`](docs/geometric-rules.md).
 
 Open the BCF file in Revit, ArchiCAD or a BCF viewer to go to each object.
 
