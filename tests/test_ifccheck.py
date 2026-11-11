@@ -248,3 +248,19 @@ def test_voids_and_gross_area_zones_are_not_floor_area():
     sp[0].LongName, sp[0].PredefinedType = "Level 1 GFA", "GFA"
     assert ifccheck.Facts(m).floor_area(sp[0]) == 0.0
     assert not ifccheck.not_floor(type("S", (), {"Name": "Avoid store", "LongName": None})())
+    assert ifccheck.not_floor(type("S", (), {"Name": "V1", "LongName": "Void"})())
+
+
+def test_single_storey_frame_is_exempt_but_compartment_walls_are_not():
+    # by-law 216(1): one storey, no basement -> columns and beams need no period
+    one = ifcmodel.office(storeys=1, wall_frp="15")
+    ifcmodel.add_column(one, rating="15", name="C-low")
+    fs = ifccheck.check_rules(one)
+    assert not [f for f in fs if f.rule == "IFC-FRP" and "column" in f.message]
+    assert [f for f in fs if f.rule == "IFC-FRP-SINGLE"][0].detail["exempt"] == {"column": 1}
+    assert [f for f in fs if f.rule == "IFC-FRP" and "wall" in f.message]     # compartment wall: still 30 min
+    two = ifcmodel.office(storeys=2)
+    ifcmodel.add_column(two, rating="15", name="C-low")
+    fs = ifccheck.check_rules(two)
+    assert [f for f in fs if f.rule == "IFC-FRP" and "column" in f.message]
+    assert not [f for f in fs if f.rule == "IFC-FRP-SINGLE"]

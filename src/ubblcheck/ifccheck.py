@@ -97,7 +97,7 @@ def objects(model, cls: str, types) -> list:
     return [e for t in typed if (t.PredefinedType or "") in types for e in uel.get_types(t)]
 
 
-_VOID = re.compile(r"open to below|void|terbuka ke bawah|double (height|volume)|upper part of", re.I)
+_VOID = re.compile(r"open to below|\bvoid\b|terbuka ke bawah|double (height|volume)|upper part of", re.I)
 
 
 def not_floor(space) -> bool:
@@ -339,6 +339,16 @@ def _structure(f: Facts):
                 yield el, ps, kind, st
 
 
+def _exempt_single_storey(el, ps, kind, compartment) -> bool:
+    """By-law 216(1): in a single-storey building, the structural frame, beams and columns, and internal
+    loadbearing walls that are not compartment walls, need no Ninth Schedule period.  (A beam or
+    column in or carrying a wall still needs that wall's period; the model can't say which those are,
+    so the info finding names the condition.)"""
+    if kind in ("column", "beam"):
+        return True
+    return kind == "wall" and not compartment and _prop(el, ps, "IsExternal") is not True
+
+
 def _ninth(f: Facts, height):
     """Ninth Schedule periods for elements of structure.  The line is chosen from the size of the
     compartment each element is in (or bounds); without compartments, from the building."""
@@ -360,10 +370,15 @@ def _ninth(f: Facts, height):
     basements = {s.id() for s in f.basements}
     ground = min(f.above_ground, key=f.elev, default=None)
     over_basement = ground.id() if (basements and ground is not None) else None
+    single = sizes.storeys <= 1 and not basements
     short = defaultdict(list)
     unread = defaultdict(list)
+    exempt = defaultdict(int)
     for el, ps, kind, st in _structure(f):
         compartment = _prop(el, ps, "Compartmentation") is True
+        if single and _exempt_single_storey(el, ps, kind, compartment):
+            exempt[kind] += 1
+            continue
         have = frp_minutes(_prop(el, ps, "FireRating"))
         if have is None:
             if not compartment:     # compartment walls and floors: the IDS pack (MY-P08, MY-P09) reports them
@@ -381,6 +396,12 @@ def _ninth(f: Facts, height):
         need, label, req = max(needs, key=lambda n: n[0])
         if have < need:
             short[(st.Name, kind, need, label, req.line)].append((el, have))
+    if exempt:
+        what = ", ".join(f"{n} {k}{'s' if n > 1 else ''}" for k, n in sorted(exempt.items()))
+        out.append(Finding("IFC-FRP-SINGLE", "info",
+                           f"Single-storey building: {what} need no fire resistance period (by-law 216(1)), "
+                           "except a beam or column in or carrying a wall, which needs that wall's period",
+                           "UBBL by-law 216(1)", [], {"exempt": dict(exempt)}))
     if too_big:
         what = "; ".join(f"{label} ({area:.0f} m2 storey, {vol:.0f} m3)" for label, area, vol in too_big[:6])
         more = f" and {len(too_big) - 6} more" if len(too_big) > 6 else ""

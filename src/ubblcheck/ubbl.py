@@ -1,7 +1,8 @@
 """UBBL 1984 fire tables as data.
 
 Values are transcribed from the JKR consolidated text of the Uniform Building
-By-Laws 1984 (Fifth, Seventh, Ninth and Tenth Schedules, by-laws 134-177).  Each table keeps
+By-Laws 1984 (the Fifth, Seventh, Ninth and Tenth Schedules and the Part VII and VIII
+rules that read them; docs/bylaws.md lists which).  Each table keeps
 the clause it came from so a finding can cite it.  Where the consolidated text
 looks like a transcription slip the value used here is noted in ERRATA so a
 reviewer can check it against the gazetted copy of the state in question.
@@ -225,8 +226,8 @@ MIN_EXITS = 2                        # by-law 177(d)
 
 
 # ---------------------------------------------------------------- Ninth Schedule
-# Minimum periods of fire resistance for elements of structure (by-law 142(3), 147,
-# 158(1), 162, 213, 216(2)).  Part 1, buildings other than single storey:
+# Minimum periods of fire resistance for elements of structure (by-law 213; also cited by
+# 142, 147, 158, 162 and 216).  Part 1, buildings other than single storey:
 # (group, max_storeys, height_m, floor_area_m2, volume_m3, above_hours, basement_hours, marks)
 # height: the line applies to buildings not exceeding it; "over 28" is no limit.
 # floor area: of each storey of the building, or of the compartment the element is in;
@@ -281,7 +282,7 @@ _NINTH_2 = [
     ("VII", 3000, 0.5), ("VII", INF, 1.0),
     ("VIII", 500, 0.5), ("VIII", 1000, 1.0), ("VIII", 3000, 2.0), ("VIII", INF, 4.0),
 ]
-NINTH_CLAUSE = "UBBL by-law 142(2), Ninth Schedule"
+NINTH_CLAUSE = "UBBL by-law 213, 216, Ninth Schedule"
 
 
 @dataclass(frozen=True)

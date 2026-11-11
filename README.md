@@ -87,7 +87,8 @@ complies:
 - fire doors in compartment walls (by-law 162);
 - fire resistance of columns, beams, floors and loadbearing or compartment walls
   against the Ninth Schedule line for the building's group, height, storey area and
-  volume (by-law 142), including the basement column and notes (a)-(c);
+  volume (by-law 213), including the basement column and notes (a)-(c), and the
+  single-storey exemptions of by-law 216(1);
 - rising mains and a fire lift above 18.3 m (by-law 229–231).
 
 It also measures from the geometry instead of trusting declared values:
