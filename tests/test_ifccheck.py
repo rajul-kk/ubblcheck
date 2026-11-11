@@ -177,3 +177,25 @@ def test_elements_are_placed_in_compartments_by_geometry():
     frp = [f for f in ifccheck.check_rules(md.m) if f.rule == "IFC-FRP"]
     assert len(frp) == 1 and frp[0].where == [walls["in-big"].GlobalId]
     assert frp[0].detail["required_min"] == 90 and frp[0].detail["basis"] == "compartment CB"
+
+
+def test_tenth_schedule_systems():
+    # IV, 40 m: line IV 4, sprinklers and hose reels, manual electrical alarm, generators
+    tall = ifccheck.check_rules(ifcmodel.office(storeys=10, fire_lift=True, breeching=True, height=40.0))
+    a = [f for f in tall if f.rule == "IFC-TENTH-A"]
+    assert len(a) == 1 and a[0].severity == "error" and a[0].detail["line"] == "IV 4"
+    assert not any(f.rule in ("IFC-TENTH-G", "IFC-TENTH-2") for f in tall)
+    # IV, two storeys, 1600 m2: line IV 2 (hose reels, manual alarm); take the break glass units away
+    m = ifcmodel.office()
+    for e in m.by_type("IfcAlarm"):
+        m.remove(e)
+    r = rules(ifccheck.check_rules(m))
+    assert r["IFC-TENTH-2"] == 1 and r["IFC-TENTH-G"] == 0 and r["IFC-TENTH-A"] == 0
+
+
+def test_tenth_schedule_needs_the_room_count_for_hotels():
+    m = ifcmodel.office(group="III")
+    b = m.by_type("IfcBuilding")[0]
+    ifcmodel._ps(m, b, "MY_FireSafety", {"SubUse": "hotel"})
+    t = [f for f in ifccheck.check_rules(m) if f.rule == "IFC-TENTH"]
+    assert len(t) == 1 and t[0].severity == "info" and t[0].detail["missing"] == ["rooms"]

@@ -8,6 +8,8 @@ GROUP	1	MY_FireSafety
 PARAM	dd2e5e93-8a02-5450-b919-fcc6a84badbd	PurposeGroup	TEXT		1	1	UBBL purpose group I-VIII (Fifth Schedule). Project information / building.	1	0
 PARAM	b249a0cb-78a3-5bc4-b620-7d3f7f9121b5	SubUse	TEXT		1	1	Seventh Schedule row, e.g. hospital, school, hotel, flat, parking. Optional.	1	0
 PARAM	72fb490c-63d4-5820-9cea-6262df6b96dd	BuildingHeight	LENGTH		1	1	Height as measured under by-law 135(a).	1	0
+PARAM	68b728e1-1b2b-562a-8680-81583ea5066d	TenthUse	TEXT		1	1	Tenth Schedule row when the purpose group's default does not fit, e.g. II.library, VIII.storage. Optional.	1	0
+PARAM	7188c555-8337-59fa-96b0-c14f2488c239	Rooms	INTEGER		1	1	Number of rooms (hotels, Tenth Schedule III 1). Optional.	1	0
 PARAM	8a982c76-8685-5c6e-bec4-2b0d5c089efe	CompartmentId	TEXT		1	1	Fire compartment the room belongs to.	1	0
 PARAM	8b1297e8-87bf-50b4-8744-f648d7574e0f	MaxTravelDistance	LENGTH		1	1	Longest travel distance from the room to the nearest storey exit, measured on the walking line (by-law 165).	1	0
 PARAM	9cc197f8-594f-5190-9d5d-595b6c59b096	DeadEndDistance	LENGTH		1	1	Longest dead-end travel from the room, if any.	1	0

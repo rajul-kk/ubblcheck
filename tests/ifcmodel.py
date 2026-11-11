@@ -68,9 +68,11 @@ def office(storeys=2, space_area=400.0, comp_split=True, travel=40.0, exit_width
         items += [stair, slab]
         hr = root.create_entity(m, ifc_class="IfcFireSuppressionTerminal", name=f"HR{i}",
                                 predefined_type="HOSEREEL")
+        bg = root.create_entity(m, ifc_class="IfcAlarm", name=f"BG{i}", predefined_type="BREAKGLASSBUTTON")
         if tags:
             hr.Tag = f"HR{i + 1}"
-        items.append(hr)
+            bg.Tag = f"BG{i + 1}"
+        items += [hr, bg]
         if fire_lift:
             lift = root.create_entity(m, ifc_class="IfcTransportElement", name=f"FL{i}",
                                       predefined_type="ELEVATOR")

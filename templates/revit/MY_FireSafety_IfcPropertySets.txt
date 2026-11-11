@@ -7,11 +7,15 @@ PropertySet:	MY_FireSafety	I	IfcBuilding
 	PurposeGroup	Label
 	SubUse	Label
 	BuildingHeight	Length
+	TenthUse	Label
+	Rooms	Integer
 PropertySet:	MY_FireSafety	I	IfcSpace
 	CompartmentId	Label
 	MaxTravelDistance	Length
 	DeadEndDistance	Length
 	OccupancyUse	Label
+PropertySet:	MY_FireSafety	I	IfcWall,IfcSlab,IfcColumn,IfcBeam
+	CompartmentId	Label
 PropertySet:	Pset_BuildingCommon	I	IfcBuilding
 	SprinklerProtectionAutomatic	Boolean
 PropertySet:	Pset_WallCommon	I	IfcWall

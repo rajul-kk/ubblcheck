@@ -189,6 +189,7 @@ def check_rules(model: ifcopenshell.file) -> list[Finding]:
     out += _fire_doors(f)
     out += _ninth(f, height)
     out += _systems(f)
+    out += _tenth(f, height)
     return out
 
 
@@ -553,6 +554,63 @@ def _systems(f: Facts):
         out.append(Finding("IFC-WETRISER", "info",
                            f"Topmost floor is {top:.1f} m above ground: the rising system must be wet, not dry",
                            "UBBL by-law 231", []))
+    return out
+
+
+# Objects that show a Tenth Schedule system is in the model: code -> (IFC class, predefined types, name)
+_TENTH_OBJECTS = {
+    "G": ("IfcFireSuppressionTerminal", ("HOSEREEL",), "hose reels (IfcFireSuppressionTerminal HOSEREEL)"),
+    "H": ("IfcFireSuppressionTerminal", ("FIREHYDRANT",), "hydrants (IfcFireSuppressionTerminal FIREHYDRANT)"),
+    "1": ("IfcSensor", ("SMOKESENSOR", "HEATSENSOR"), "smoke or heat detectors (IfcSensor)"),
+    "2": ("IfcAlarm", ("BREAKGLASSBUTTON", "MANUALPULLBOX", "BELL", "SIREN"),
+          "break glass units or alarm bells (IfcAlarm)"),
+}
+
+
+def tenth_inputs(f: Facts, height: float) -> dict:
+    """The building's size as the Tenth Schedule reads it."""
+    sizes = dimensions(f)
+    occupied = {s.id() for s in f.occupied}
+    rooms = _prop(f.building, PSET, "Rooms") if f.building else None
+    return {"storeys": len(f.occupied), "height_m": height,
+            "floor_area_m2": sizes.building_area,
+            "total_area_m2": sum(a for sid, a in sizes.storey_area.items() if sid in occupied),
+            "volume_m3": max(sizes.comp_volume.values(), default=0.0) or sizes.building_volume,
+            "rooms": int(rooms) if rooms is not None else None}
+
+
+def _tenth(f: Facts, height: float) -> list[Finding]:
+    """Fire extinguishment and alarm systems the Tenth Schedule line requires, against the objects in
+    the model.  Emergency lighting and alarm types 3-4 have no IFC object here and are not checked."""
+    gid = [f.building.GlobalId] if f.building else []
+    try:
+        use = ubbl.tenth_use(f.group, f.use, _prop(f.building, PSET, "TenthUse") if f.building else None)
+    except KeyError as e:
+        return [Finding("IFC-TENTH", "warning", f"{e.args[0]}: set MY_FireSafety.TenthUse on the building",
+                        ubbl.TENTH_CLAUSE, gid)]
+    look = ubbl.tenth(use, **tenth_inputs(f, height))
+    if not look.decided:
+        why = (f"needs {', '.join(look.missing)} to choose a line" if look.missing
+               else "has no line for this building's size")
+        return [Finding("IFC-TENTH", "info", f"Tenth Schedule, {look.title}: {why}; active systems not checked",
+                        ubbl.TENTH_CLAUSE, gid, {"use": use, "missing": list(look.missing)})]
+    row, out = look.row, []
+    where = f"Tenth Schedule {row.ref} ({row.title})"
+    detail = {"use": use, "line": row.ref, "requires": row.describe()}
+    if row.refer:
+        out.append(Finding("IFC-TENTH", "info", f"{where}: {row.refer}", row.clause, gid, detail))
+    if row.requires("A") and not f.sprinklered:
+        out.append(Finding("IFC-TENTH-A", "error",
+                           f"{where} requires automatic sprinklers, but the building is not declared sprinklered "
+                           "(Pset_BuildingCommon.SprinklerProtectionAutomatic); sprinklered limits were not used",
+                           row.clause, gid, detail))
+    for code, (cls, types, what) in _TENTH_OBJECTS.items():
+        # sprinklers: IFC-TENTH-A above when undeclared, IFC-SPRINKLER when declared but no heads
+        if row.requires(code) and not [e for e in f.model.by_type(cls) if (e.PredefinedType or "") in types]:
+            out.append(Finding(f"IFC-TENTH-{code}", "warning",
+                               f"{where} requires {ubbl.EXTINGUISHING.get(code) or ubbl.ALARMS[code]}; the model has "
+                               f"no {what} (fine for an architectural model; needed in the active model)",
+                               row.clause, gid, detail))
     return out
 
 

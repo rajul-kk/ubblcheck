@@ -1,0 +1,208 @@
+# UBBL 1984 Tenth Schedule: fire extinguishment, alarm systems and emergency lighting
+# (by-law 225(1), 237(1)).  Transcribed from the gazetted text, G.N. 5178/1984 (JKR copy).
+#
+# Codes, as in the Schedule's notes:
+#   extinguishing (Note 2): A automatic sprinklers, B water spray, C high-expansion foam,
+#     D carbon dioxide, E halogenated, F other automatic, G hose reel, H hydrant system
+#   alarm (Note 3): 1 automatic fire detectors, 2 manual electrical fire alarm,
+#     3 signal indicator alarm, 4 manual alarm
+#   lighting (Note 4): a signal point units, b central battery, c generators (1 hour minimum)
+# Heights are measured from the highest point of fire appliance access (Note 5).
+#
+# Row syntax.  The first row whose conditions all hold applies.
+#   ext:   letters all required ("AG" = sprinklers and hose reels); "|" separates
+#          alternatives ("A|B|C" = any one of them); "" = none
+#   alarm: "1&2" = both; "" = none.     light: "b|c" = either; "" = none
+#   storeys, rooms: [min, max] inclusive; null = open
+#   height (m), floor_area (largest storey, m2), total_area (all storeys, m2),
+#   volume (largest compartment, or the building, m3): [min, max): min included, max not
+#   refer: the Schedule gives words, not codes, for this row; reported for a person to check
+#   errata: key in ubbl.ERRATA where the printed row needed a reading
+#
+# Rows are ordered so a stricter line is tried first where the printed ranges overlap.
+
+uses:
+  I:
+    title: Small residential (private dwelling, terrace, semi-detached)
+    rows:
+      - {ref: I, ext: "", alarm: "", light: ""}
+
+  II.education:
+    title: Educational, used for instruction only (II 1(i))
+    rows:
+      - {ref: "II 1(i)(d)", storeys: [11, null], ext: G, alarm: "1&2", light: a, errata: TENTH.II.edu.d}
+      - {ref: "II 1(i)(c)", storeys: [6, 10], ext: G, alarm: "2", light: a}
+      - {ref: "II 1(i)(b)", storeys: [3, 5], ext: G, alarm: "", light: ""}
+      - {ref: "II 1(i)(a)", storeys: [1, 2], ext: "", alarm: "", light: ""}
+  II.laboratory:
+    title: Educational laboratory (II 1(iii))
+    rows:
+      - {ref: "II 1(iii)(a)", total_area: [1000, null], ext: G, alarm: "1&2", light: a}
+  II.library:
+    title: Library (II 1(iv))
+    rows:
+      - {ref: "II 1(iv)(c)", storeys: [3, null], ext: G, alarm: "1&2", light: a}
+      - {ref: "II 1(iv)(c)", total_area: [1000, null], ext: G, alarm: "1&2", light: a}
+      - {ref: "II 1(iv)(b)", storeys: [2, 2], ext: G, alarm: "", light: ""}
+      - {ref: "II 1(iv)(a)", storeys: [1, 1], ext: "", alarm: "", light: ""}
+  II.vocational:
+    title: Vocational school, wood or metal work (II 1(v))
+    rows:
+      - {ref: "II 1(v)(b)", storeys: [3, null], ext: G, alarm: "1&2", light: ""}
+      - {ref: "II 1(v)(a)", storeys: [1, 2], ext: G, alarm: "", light: ""}
+  II.grand_hall:
+    title: Grand hall with fly galleries, gridirons, riggings for movable scenery (II 1(vi))
+    rows:
+      - {ref: "II 1(vi)", ext: G, alarm: "1&2", light: b}
+  II.central_ac:
+    title: Educational building with central air-conditioning (II 1(vii))
+    rows:
+      - {ref: "II 1(vii)", total_area: [1000, null], ext: AG, alarm: "2", light: "b|c", errata: TENTH.II.ac}
+      - {ref: "II 1(vii)", total_area: [500, 1000], ext: G, alarm: "1&2", light: "b|c", errata: TENTH.II.ac}
+      - {ref: "II 1(vii)", storeys: [2, null], ext: G, alarm: "1&2", light: "b|c", errata: TENTH.II.ac}
+  II.clinic:
+    title: Clinic, day care (II 2(i))
+    rows:
+      - {ref: "II 2(i)", ext: "", alarm: "", light: ""}
+  II.hospital:
+    title: Hospital or nursing home with in-patients (II 2(ii))
+    rows:
+      - {ref: "II 2(ii)(be)", floor_area: [0, 250], height: [18, null], ext: AG, alarm: "3", light: "b|c"}
+      - {ref: "II 2(ii)(bd)", floor_area: [0, 250], storeys: [5, 6], ext: G, alarm: "1&3", light: "b|c"}
+      - {ref: "II 2(ii)(bc)", floor_area: [0, 250], storeys: [3, 4], ext: G, alarm: "3", light: b}
+      - {ref: "II 2(ii)(bb)", floor_area: [0, 250], storeys: [2, 2], ext: "", alarm: "3", light: a}
+      - {ref: "II 2(ii)(ba)", floor_area: [0, 250], storeys: [1, 1], ext: "", alarm: "", light: a}
+      - {ref: "II 2(ii)(c)", floor_area: [250, null], storeys: [5, null], ext: AG, alarm: "3", light: a}
+      - {ref: "II 2(ii)(c)", floor_area: [250, null], storeys: [3, 4], ext: G, alarm: "1&3", light: a}
+      - {ref: "II 2(ii)(c)", floor_area: [250, null], storeys: [2, 2], ext: G, alarm: "3", light: a}
+      - {ref: "II 2(ii)(c)", floor_area: [250, null], storeys: [1, 1], ext: "", alarm: "", light: a}
+  II.operating_theatre:
+    title: Operating theatres (II 2(ii)(bf))
+    rows:
+      - {ref: "II 2(ii)(bf)", ext: G, alarm: "3", light: a}
+
+  III.hotel_open:
+    title: Hotel, open balcony approach with open, extended-lobby or tower staircase (III 1(i))
+    rows:
+      - {ref: "III 1(i)(e)", storeys: [11, null], ext: AG, alarm: "2", light: c}
+      - {ref: "III 1(i)(d)", storeys: [6, 10], ext: G, alarm: "1&2", light: c}
+      - {ref: "III 1(i)(c)", storeys: [4, 5], ext: G, alarm: "2", light: b}
+      - {ref: "III 1(i)(b)(ii)", storeys: [1, 3], rooms: [51, null], ext: G, alarm: "", light: b}
+      - {ref: "III 1(i)(a)", storeys: [1, 1], rooms: [0, 19], ext: "", alarm: "", light: ""}
+      - {ref: "III 1(i)(b)(i)", storeys: [1, 3], rooms: [0, 50], ext: "", alarm: "", light: a}
+  III.hotel:
+    title: Hotel, other designs (III 1(ii))
+    rows:
+      - {ref: "III 1(ii)(f)", height: [18, null], ext: AG, alarm: "2", light: c}
+      - {ref: "III 1(ii)(d)", rooms: [51, null], storeys: [4, null], ext: AG, alarm: "2", light: c}
+      - {ref: "III 1(ii)(d)", rooms: [51, null], storeys: [1, 3], ext: G, alarm: "", light: c}
+      - {ref: "III 1(ii)(e)", rooms: [0, 19], storeys: [4, 6], ext: G, alarm: "1&2", light: a}
+      - {ref: "III 1(ii)(c)", rooms: [21, 50], ext: G, alarm: "1&2", light: a}
+      - {ref: "III 1(ii)(b)", rooms: [11, 20], ext: G, alarm: "2", light: a}
+      - {ref: "III 1(ii)(a)", rooms: [0, 10], ext: "", alarm: "", light: a}
+  III.dormitory:
+    title: Hostels and dormitories (III 2)
+    rows:
+      - {ref: "III 2(a)(iv)", storeys: [11, null], ext: AG, alarm: "2", light: a}
+      - {ref: "III 2(a)(iii)", storeys: [3, 10], ext: G, alarm: "1&2", light: a, errata: TENTH.III.dorm.3}
+      - {ref: "III 2(a)(ii)", storeys: [2, 2], ext: G, alarm: "2", light: a}
+      - {ref: "III 2(a)(i)", storeys: [1, 1], ext: "", alarm: "", light: ""}
+  III.flat:
+    title: Flats, walk-up or open balcony approach (III 3)
+    rows:
+      - {ref: "III 3(b)(ii)", height: [60, null], ext: "", alarm: "", light: "",
+         refer: "Wet riser, two 30 m x 37 mm hoses with nozzle, two 9 kg ABC extinguishers at the caretaker's flat or fire point"}
+      - {ref: "III 3(b)(i)", storeys: [6, null], ext: "", alarm: "", light: "",
+         refer: "Dry riser or down-comer, 45.5 m3 overhead tank, two 30 m x 37 mm hoses with nozzle, two 9 kg ABC extinguishers"}
+      - {ref: "III 3(a)", storeys: [1, 5], ext: "", alarm: "", light: ""}
+  III.flat_central_ac:
+    title: Flats with central air-conditioning (III 3(e))
+    rows:
+      - {ref: "III 3(e)", storeys: [11, null], ext: AG, alarm: "2", light: c, refer: "Also fire lifts; wet riser"}
+      - {ref: "III 3(e)", storeys: [6, 10], ext: G, alarm: "2", light: c, refer: "Also a fire lift and self-contained detectors"}
+      - {ref: "III 3(e)", storeys: [3, 5], ext: G, alarm: "", light: a}
+
+  IV:
+    title: Offices
+    rows:
+      - {ref: "IV 4", height: [30, null], ext: AG, alarm: "2", light: c}
+      - {ref: "IV 4", total_area: [10000, null], ext: AG, alarm: "2", light: c}
+      - {ref: "IV 3", height: [18, null], ext: G, alarm: "1&2", light: c}
+      - {ref: "IV 2", storeys: [5, null], ext: G, alarm: "2", light: a}
+      - {ref: "IV 2", total_area: [1000, null], ext: G, alarm: "2", light: a}
+      - {ref: "IV 1", storeys: [1, 4], total_area: [0, 1000], ext: "", alarm: "", light: ""}
+
+  V:
+    title: Shops
+    rows:
+      - {ref: "V 2(d)", storeys: [1, 1], total_area: [2000, null], ext: AG, alarm: "2", light: a}
+      - {ref: "V 2(c)", storeys: [1, 1], total_area: [1000, 2000], ext: G, alarm: "1&2", light: a}
+      - {ref: "V 2(b)", storeys: [1, 1], total_area: [750, 1000], ext: G, alarm: "2", light: a}
+      - {ref: "V 2(a)", storeys: [1, 1], total_area: [0, 750], ext: "", alarm: "", light: ""}
+      - {ref: "V 3", storeys: [2, 2], total_area: [2000, null], ext: AG, alarm: "2", light: c}
+      - {ref: "V 3", storeys: [2, 2], total_area: [1000, 2000], ext: G, alarm: "1&2", light: a}
+      - {ref: "V 3", storeys: [2, 2], total_area: [750, 1000], ext: G, alarm: "2", light: a}
+      - {ref: "V 3", storeys: [2, 2], total_area: [0, 750], ext: G, alarm: "", light: a}
+      - {ref: "V 3", storeys: [3, null], total_area: [3000, null], ext: AG, alarm: "2", light: c}
+      - {ref: "V 3", storeys: [3, null], total_area: [1000, 3000], ext: G, alarm: "1&2", light: a}
+      - {ref: "V 3", storeys: [3, null], total_area: [0, 1000], ext: G, alarm: "2", light: a}
+
+  VI:
+    title: Factories (single storey, two storeys with each floor a compartment, flatted factories)
+    rows:
+      - {ref: "VI 4(c)", storeys: [6, null], ext: AG, alarm: "2", light: c}
+      - {ref: "VI 4(b)", storeys: [3, 5], volume: [7000, null], ext: AG, alarm: "2", light: c}
+      - {ref: "VI 4(b)", storeys: [3, 5], ext: HG, alarm: "1&2", light: c}
+      - {ref: "VI 3(d)", storeys: [2, 2], floor_area: [1000, null], ext: AG, alarm: "1&2", light: a}
+      - {ref: "VI 3(c)", storeys: [2, 2], floor_area: [750, 1000], ext: G, alarm: "1&2", light: a}
+      - {ref: "VI 3(b)", storeys: [2, 2], floor_area: [500, 750], ext: G, alarm: "2", light: a}
+      - {ref: "VI 3(a)", storeys: [2, 2], floor_area: [0, 500], ext: G, alarm: "", light: ""}
+      - {ref: "VI 1(b)", storeys: [1, 1], total_area: [750, null], ext: G, alarm: "2", light: ""}
+      - {ref: "VI 1(a)", storeys: [1, 1], total_area: [0, 750], ext: "", alarm: "", light: ""}
+  VI.special:
+    title: Special factory structures and hazardous processes (VI 2, 5)
+    rows:
+      - {ref: "VI 5", ext: "A|B|C|D|E|F", alarm: "2", light: a,
+         refer: "Mills, refineries and hazardous processes: Fire Department to set the protection"}
+
+  VII:
+    title: Places of assembly
+    rows:
+      - {ref: VII, ext: "", alarm: "", light: "",
+         refer: "The Schedule lists only special assembly risks: class A and B below exit discharge and stages with fly galleries (A & G, 2, b), and hazardous areas (A-F, a)"}
+
+  VIII.parking:
+    title: Car parks (VIII 1)
+    rows:
+      - {ref: "VIII 1", ext: HG, alarm: "2", light: a, errata: TENTH.VIII.park}
+  VIII.storage:
+    title: Storage and general (VIII 3)
+    rows:
+      - {ref: "VIII 3(b)", storeys: [2, null], total_area: [1000, null], ext: AG, alarm: "2", light: a}
+      - {ref: "VIII 3(b)(ii)", storeys: [2, null], total_area: [500, 1000], ext: HG, alarm: "1&2", light: a}
+      - {ref: "VIII 3(b)(i)", storeys: [2, null], total_area: [0, 500], ext: G, alarm: "2", light: ""}
+      - {ref: "VIII 3(a)", storeys: [1, 1], volume: [7000, null], ext: AG, alarm: "2", light: a}
+      - {ref: "VIII 3(a)", storeys: [1, 1], volume: [1400, 7000], ext: HG, alarm: "1&2", light: a}
+      - {ref: "VIII 3(a)(ii)", storeys: [1, 1], total_area: [0, 250], ext: "", alarm: "", light: ""}
+      - {ref: "VIII 3(a)(ii)", storeys: [1, 1], total_area: [250, null], ext: G, alarm: "2", light: "", errata: TENTH.VIII.gap}
+
+# Seventh Schedule use (purpose group or group.sub_use) -> Tenth Schedule use, when the
+# form or model does not name a Tenth Schedule use itself.
+default_use:
+  I: I
+  II.hospital: II.hospital
+  II.school: II.education
+  II.open_plan: II.education
+  II.flexible_plan: II.education
+  III.hotel: III.hotel
+  III.flat: III.flat
+  III.dormitory: III.dormitory
+  IV: IV
+  V: V
+  VI.general: VI
+  VI.high_hazard: VI.special
+  VI.open_structure: VI.special
+  VII: VII
+  VIII.parking: VIII.parking
+  VIII.low_ordinary: VIII.storage
+  VIII.high_hazard: VIII.storage

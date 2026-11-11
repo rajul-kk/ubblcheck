@@ -36,6 +36,8 @@ Data with no IFC home goes in the custom set `MY_FireSafety`.
 | Purpose group I–VIII | `IfcBuilding` · `MY_FireSafety.PurposeGroup` | by-law 134, Fifth Schedule |
 | Seventh Schedule row (hospital, school, flat…) | `IfcBuilding` · `MY_FireSafety.SubUse` | Seventh Schedule |
 | Building height | `IfcBuilding` · `MY_FireSafety.BuildingHeight` | by-law 135(a) |
+| Tenth Schedule row, when the group's default does not fit (`II.library`, `VIII.storage`…) | `IfcBuilding` · `MY_FireSafety.TenthUse` | Tenth Schedule |
+| Number of rooms (hotels) | `IfcBuilding` · `MY_FireSafety.Rooms` | Tenth Schedule III 1 |
 | Sprinklered | `IfcBuilding` · `Pset_BuildingCommon.SprinklerProtectionAutomatic` | by-law 136 proviso |
 | Compartment | `IfcSpace` · `MY_FireSafety.CompartmentId` | by-law 136 |
 | Compartment of an element of structure (optional) | `IfcColumn`, `IfcBeam`, `IfcSlab`, `IfcWall` · `MY_FireSafety.CompartmentId`, comma-separated for a wall between compartments | Ninth Schedule: picks the line from that compartment's size; without it, from the spaces the element touches |
@@ -78,12 +80,13 @@ passive and active sets.
 - **Travel distance is declared, not computed.** The model states the
   distance and the check compares it with the limit. Computing walking
   paths from geometry is not done.
-- **Tenth Schedule not encoded.** Which active systems a building class needs
-  is not yet a table here. The active IDS checks how objects are modelled,
-  not whether a system is required.
-- **Ninth Schedule not encoded.** Element FRP by purpose group and height is
-  still to be transcribed, so wall and floor FRP values are only
-  format-checked.
+- **Tenth Schedule: presence, not layout.** The rule checks look up the
+  building's Tenth Schedule line and warn when a required system (hose reels,
+  hydrants, detectors, manual alarms) has no object in the model; that is
+  normal for an architectural model. Coverage and spacing are not checked.
+- **Ninth Schedule: listed elements only.** Element FRP is checked against the
+  Ninth Schedule for walls, floors, columns and beams. Notional periods of
+  materials (Part 2) are not encoded.
 - **One possible misprint.** In the JKR text of the Seventh Schedule, the
   Shops travel-distance row prints sprinklered as lower than unsprinklered.
   The tool uses 45 m unsprinklered and 60 m sprinklered, and `ubbl.ERRATA`
@@ -96,7 +99,7 @@ passive and active sets.
 
 1. Manage › Shared Parameters: open `MY_FireSafety_SharedParameters.txt`.
 2. Manage › Project Parameters:
-   - Add `PurposeGroup`, `SubUse`, `BuildingHeight` and
+   - Add `PurposeGroup`, `SubUse`, `BuildingHeight`, `TenthUse`, `Rooms` and
      `SprinklerProtectionAutomatic` to Project Information.
    - Add `CompartmentId`, `MaxTravelDistance`, `DeadEndDistance` and
      `OccupancyUse` to Rooms.

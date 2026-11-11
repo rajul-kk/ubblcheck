@@ -104,6 +104,17 @@ ERRATA = {
                       "6 to 10 storeys.",
     "TENTH.VIII.gap": "Tenth Schedule, single-storey general storage: no line covers 500 m2 to "
                       "1 400 m3; the 250-500 m2 line (G, 2) is used.",
+    "TENTH.II.ac": "Tenth Schedule II 1(vii), educational buildings with central air-conditioning: "
+                   "three result lines stand against 'two or more storeys 500 sq. m - 1 000 sq. m "
+                   "exceeding 1 000 sq. m'.  Read as: over 1 000 m2 (AG, 2), 500-1 000 m2 (G, 1 & 2), "
+                   "otherwise two or more storeys (G, 1 & 2), lighting b or c throughout.",
+    "TENTH.III.dorm.3": "Tenth Schedule III 2(a): 3 storeys falls in both '2 - 3 storeys' (G, 2, a) and "
+                        "'3 storeys to 10 storeys' (G, 1 & 2, a); the stricter second line is used.",
+    "TENTH.III.hotel.10": "Tenth Schedule III 1(ii): 'less than 10 rooms' and '11 to 20 rooms' leave "
+                          "10 rooms out; it is read with the first line.",
+    "TENTH.VIII.park": "Tenth Schedule VIII 1, car parks: 'Open car-parks above ground' prints G, 2, a "
+                       "and its two sub-lines (4 storeys and below, 5 storeys and over) both H & G, 2, a; "
+                       "H & G, 2, a is used for every multi-storey car park.",
     "V": "JKR text prints the Shops row as 15 / 60 / 45 (sprinklered below unsprinklered, "
          "unlike every other row); 45 / 60 is used here. Check the gazetted state copy.",
 }
@@ -336,3 +347,133 @@ def element_frp(req: FireResistance, kind: str, basement: bool, compartment_floo
     if kind == "floor" and "b" in req.marks and not compartment_floor:
         m = min(m, 30)
     return m
+
+
+# ---------------------------------------------------------------- Tenth Schedule
+# Fire extinguishment, alarm systems and emergency lighting (by-law 225(1), 237(1)).
+# The table is data/tenth.yaml; see its header for the row syntax and the codes.
+TENTH_CLAUSE = "UBBL by-law 225(1), 237(1), Tenth Schedule"
+EXTINGUISHING = {"A": "automatic sprinklers", "B": "water spray system", "C": "high-expansion foam",
+                 "D": "carbon dioxide system", "E": "halogenated system", "F": "other automatic system",
+                 "G": "hose reels", "H": "hydrant system"}
+ALARMS = {"1": "automatic fire detectors", "2": "manual electrical fire alarm",
+          "3": "signal indicator alarm", "4": "manual alarm"}
+LIGHTING = {"a": "signal point units", "b": "central battery", "c": "generators"}
+TENTH_INPUTS = ("storeys", "height_m", "floor_area_m2", "total_area_m2", "volume_m3", "rooms")
+_COND = {"storeys": ("storeys", True), "rooms": ("rooms", True), "height": ("height_m", False),
+         "floor_area": ("floor_area_m2", False), "total_area": ("total_area_m2", False),
+         "volume": ("volume_m3", False)}      # row key -> (input, max is inclusive)
+_TENTH = None
+
+
+def _tenth_data() -> dict:
+    global _TENTH
+    if _TENTH is None:
+        import os
+        import yaml
+        with open(os.path.join(os.path.dirname(__file__), "data", "tenth.yaml"), encoding="utf-8") as fh:
+            _TENTH = yaml.safe_load(fh)
+    return _TENTH
+
+
+@dataclass(frozen=True)
+class TenthRow:
+    use: str
+    title: str
+    ref: str
+    ext: tuple            # alternatives, each a frozenset of codes; () = none
+    alarm: frozenset
+    light: frozenset      # any one of these
+    refer: str | None = None
+    errata: str | None = None
+
+    @property
+    def clause(self) -> str:
+        return TENTH_CLAUSE
+
+    def requires(self, code: str) -> bool:
+        """True if every way of meeting this line includes `code` (an extinguishing letter or alarm digit)."""
+        if code in ALARMS:
+            return code in self.alarm
+        return bool(self.ext) and all(code in alt for alt in self.ext)
+
+    def describe(self) -> str:
+        parts = []
+        if self.ext:
+            parts.append(" or ".join(" and ".join(EXTINGUISHING[c] for c in sorted(alt)) for alt in self.ext))
+        if self.alarm:
+            parts.append(" and ".join(ALARMS[c] for c in sorted(self.alarm)))
+        if self.light:
+            parts.append("emergency lighting by " + " or ".join(LIGHTING[c] for c in sorted(self.light)))
+        return "; ".join(parts) or "no fixed system, alarm or emergency lighting"
+
+
+@dataclass(frozen=True)
+class TenthLookup:
+    use: str
+    title: str
+    row: TenthRow | None          # the line that applies, if one could be chosen
+    missing: tuple = ()           # inputs needed to choose a line (row is None)
+
+    @property
+    def decided(self) -> bool:
+        return self.row is not None
+
+
+def tenth_uses() -> dict[str, str]:
+    """Tenth Schedule use key -> title."""
+    return {k: v["title"] for k, v in _tenth_data()["uses"].items()}
+
+
+def tenth_use(group: str, sub_use: str | None = None, override: str | None = None) -> str:
+    """The Tenth Schedule use: `override` if given, else the default for the Seventh Schedule use."""
+    uses = _tenth_data()["uses"]
+    if override:
+        if override not in uses:
+            raise KeyError(f"unknown Tenth Schedule use {override!r}")
+        return override
+    key = use_key(group, sub_use)
+    default = _tenth_data()["default_use"]
+    for k in (key, group):
+        if k in default:
+            return default[k]
+    raise KeyError(f"no Tenth Schedule use for {key}; name one")
+
+
+def _row(use, title, r) -> TenthRow:
+    ext = tuple(frozenset(alt) for alt in str(r.get("ext") or "").split("|") if alt)
+    alarm = frozenset(c for c in str(r.get("alarm") or "").split("&") if c)
+    light = frozenset(c for c in str(r.get("light") or "").split("|") if c)
+    return TenthRow(use, title, r["ref"], ext, alarm, light, r.get("refer"), r.get("errata"))
+
+
+def tenth(use: str, **inputs) -> TenthLookup:
+    """The Tenth Schedule line for a use and a building's size.
+
+    inputs (any may be None when not known): storeys, height_m (topmost floor above fire
+    appliance access), floor_area_m2 (largest storey), total_area_m2, volume_m3, rooms.
+    The first row whose conditions hold applies.  If the first row that could still apply
+    depends on an input that is not known, no line is chosen and `missing` names the inputs."""
+    bad = set(inputs) - set(TENTH_INPUTS)
+    if bad:
+        raise TypeError(f"unknown inputs {sorted(bad)}")
+    spec = _tenth_data()["uses"][use]
+    for r in spec["rows"]:
+        unknown, ok = [], True
+        for key, (name, inclusive) in _COND.items():
+            if key not in r:
+                continue
+            lo, hi = r[key]
+            v = inputs.get(name)
+            if v is None:
+                unknown.append(name)
+                continue
+            if (lo is not None and v < lo) or (hi is not None and (v > hi if inclusive else v >= hi)):
+                ok = False
+                break
+        if not ok:
+            continue
+        if unknown:
+            return TenthLookup(use, spec["title"], None, tuple(unknown))
+        return TenthLookup(use, spec["title"], _row(use, spec["title"], r))
+    return TenthLookup(use, spec["title"], None)
