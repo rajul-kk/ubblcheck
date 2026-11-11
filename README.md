@@ -107,6 +107,9 @@ Open the BCF file in Revit, ArchiCAD or a BCF viewer to go to each object.
 The IDS files work in any IDS-aware tool. Revit and ArchiCAD set-up files and
 the property mapping are in [`docs/ifc-my.md`](docs/ifc-my.md).
 
+[`docs/real-models.md`](docs/real-models.md) records what nine public models
+(Revit, ArchiCAD; IFC2X3 to IFC4X3) showed when run through the checker.
+
 ## Sources
 
 - Uniform Building By-Laws 1984, JKR consolidated text: Parts VII and VIII,
