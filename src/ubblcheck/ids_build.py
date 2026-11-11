@@ -29,8 +29,9 @@ VERSION = "0.1.0"
 AUTHOR = "ubblcheck@example.org"   # IDS requires an e-mail shaped author; placeholder
 
 # FireRating is an IfcLabel in IFC.  Convention used here: minutes, optionally
-# prefixed "FRP" and suffixed "min", or hours ("1 HR", "1/2 hour").
-FRP_PATTERN = (r"(FRP ?)?(30|60|90|120|180|240) ?(min|mins|MIN)?"
+# prefixed "FRP" (or the EN classes REI, EI, R) and suffixed "min", or hours ("1 HR", "1/2 hour").
+# Keep in step with ifccheck.frp_minutes.
+FRP_PATTERN = (r"((FRP|REI|EI|R) ?)?(30|60|90|120|180|240) ?(min|mins|minutes|MIN)?"
                r"|(FRP ?)?(1/2|1|1\.5|2|3|4) ?(hr|hrs|hour|hours|HR|HRS)")
 IFC = ["IFC2X3", "IFC4"]
 

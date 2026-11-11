@@ -180,7 +180,7 @@
                     </baseName>
                     <value>
                         <xs:restriction base="xs:string">
-                            <xs:pattern value="(FRP ?)?(30|60|90|120|180|240) ?(min|mins|MIN)?|(FRP ?)?(1/2|1|1\.5|2|3|4) ?(hr|hrs|hour|hours|HR|HRS)" />
+                            <xs:pattern value="((FRP|REI|EI|R) ?)?(30|60|90|120|180|240) ?(min|mins|minutes|MIN)?|(FRP ?)?(1/2|1|1\.5|2|3|4) ?(hr|hrs|hour|hours|HR|HRS)" />
                         </xs:restriction>
                     </value>
                 </property>
@@ -215,7 +215,7 @@
                     </baseName>
                     <value>
                         <xs:restriction base="xs:string">
-                            <xs:pattern value="(FRP ?)?(30|60|90|120|180|240) ?(min|mins|MIN)?|(FRP ?)?(1/2|1|1\.5|2|3|4) ?(hr|hrs|hour|hours|HR|HRS)" />
+                            <xs:pattern value="((FRP|REI|EI|R) ?)?(30|60|90|120|180|240) ?(min|mins|minutes|MIN)?|(FRP ?)?(1/2|1|1\.5|2|3|4) ?(hr|hrs|hour|hours|HR|HRS)" />
                         </xs:restriction>
                     </value>
                 </property>
@@ -293,7 +293,7 @@
                     </baseName>
                     <value>
                         <xs:restriction base="xs:string">
-                            <xs:pattern value="(FRP ?)?(30|60|90|120|180|240) ?(min|mins|MIN)?|(FRP ?)?(1/2|1|1\.5|2|3|4) ?(hr|hrs|hour|hours|HR|HRS)" />
+                            <xs:pattern value="((FRP|REI|EI|R) ?)?(30|60|90|120|180|240) ?(min|mins|minutes|MIN)?|(FRP ?)?(1/2|1|1\.5|2|3|4) ?(hr|hrs|hour|hours|HR|HRS)" />
                         </xs:restriction>
                     </value>
                 </property>

@@ -40,6 +40,10 @@ def test_frp_parsing():
     assert ifccheck.frp_minutes("1 HR") == 60
     assert ifccheck.frp_minutes("1/2 hour") == 30
     assert ifccheck.frp_minutes("fire door") is None
+    assert ifccheck.frp_minutes("REI 120") == 120
+    assert ifccheck.frp_minutes("EI 60") == 60
+    assert ifccheck.frp_minutes("120 minutes") == 120
+    assert ifccheck.frp_minutes("2 HOURS") == 120
 
 
 def test_ids_flags_missing_data(write):
@@ -98,3 +102,41 @@ def test_bcf_and_json_output(write, tmp_path):
         assert any(n.endswith("viewpoint.bcfv") for n in names)
         assert b"162" in z.read(next(n for n in names if n.endswith("markup.bcf")))
     findings.to_json(fs, str(tmp_path / "f.json"), {"file": "m.ifc"})
+
+
+def test_area_and_volume_quantities_use_their_own_units(write):
+    # Revit: lengths in mm but areas in m2; the same oversized building must fail the same rules
+    def big():
+        return ifcmodel.office(group="V", comp_split=False, space_area=3000.0)
+    metres = rules(ifccheck.check_rules(big()))
+    mm = rules(ifccheck.check_rules(ifcmodel.to_millimetres(big())))
+    assert metres["IFC-COMP-AREA"] == 2 and metres["IFC-COMP-VOL"] == 2
+    assert mm == metres
+
+
+def test_structural_elements_without_a_readable_rating_are_reported(write):
+    m = ifcmodel.office()
+    ifcmodel.add_column(m, rating=None, name="C-none")
+    ifcmodel.add_column(m, rating="see schedule", name="C-text")
+    ifcmodel.add_column(m, rating="REI 120", name="C-rei")
+    fs = ifccheck.check_rules(m)
+    data = [f for f in fs if f.rule == "IFC-FRP-DATA"]
+    assert len(data) == 1 and data[0].severity == "warning" and len(data[0].where) == 2
+    assert rules(fs)["IFC-FRP"] == 0
+
+
+def test_roof_storey_does_not_make_a_single_storey_building_multi_storey():
+    # group II single storey: 3000 m2 per compartment; multi-storey: 2000 m2
+    one = ifcmodel.office(group="II", storeys=1, space_area=1200.0, comp_split=False, roof=True)
+    assert rules(ifccheck.check_rules(one))["IFC-COMP-AREA"] == 0
+    two = ifcmodel.office(group="II", storeys=2, space_area=1200.0, comp_split=False, roof=True)
+    assert rules(ifccheck.check_rules(two))["IFC-COMP-AREA"] == 2
+
+
+def test_spaces_without_area_quantities_are_measured():
+    import geomodel as G
+    md = G.Model(group="V")
+    for i, z in enumerate((0.0, 3.5)):
+        G.box_floor(md, md.storey(f"L{i}", z), 60, 40, z=z, exits=((0, 2.0), (2, 2.0)))
+    r = rules(ifccheck.check_rules(md.m))       # 2400 m2 per storey, no Qto: limit 2000 m2
+    assert r["IFC-COMP-AREA"] == 2

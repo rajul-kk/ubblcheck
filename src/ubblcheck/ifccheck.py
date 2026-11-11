@@ -27,13 +27,13 @@ PSET = "MY_FireSafety"
 
 
 def frp_minutes(label) -> int | None:
-    """'60', 'FRP 60 min', '1 HR', '1/2 hour' -> minutes; None if unreadable."""
+    """'60', 'FRP 60 min', 'REI 120', '120 minutes', '1 HR', '1/2 hour' -> minutes; None if unreadable."""
     if label is None:
         return None
     s = str(label).strip().lower()
-    m = re.fullmatch(r"(frp ?)?(\d+) ?(min|mins)?", s)
+    m = re.fullmatch(r"(?:(?:frp|rei|ei|r) ?)?(\d+) ?(?:min|mins|minute|minutes)?", s)
     if m:
-        return int(m.group(2))
+        return int(m.group(1))
     m = re.fullmatch(r"(frp ?)?(1/2|\d+(?:\.\d+)?) ?(hr|hrs|hour|hours)", s)
     if m:
         v = 0.5 if m.group(2) == "1/2" else float(m.group(2))
@@ -84,12 +84,20 @@ def _prop(el, pset, name, default=None):
     return uel.get_psets(el).get(pset, {}).get(name, default)
 
 
+BASEMENT_BELOW_M = -1.0     # a storey more than 1 m below the ground storey is a basement
+
+
 class Facts:
-    """The few numbers the rules need, read once from the model in metres."""
+    """The few numbers the rules need, read once from the model in metres.
+
+    Quantities are converted with their own project unit: Revit, for one, exports
+    lengths in millimetres but areas in square metres."""
 
     def __init__(self, model: ifcopenshell.file):
         self.model = model
         self.scale = uunit.calculate_unit_scale(model)  # project length unit -> metres
+        self.area_scale = uunit.calculate_unit_scale(model, "AREAUNIT")
+        self.volume_scale = uunit.calculate_unit_scale(model, "VOLUMEUNIT")
         b = (model.by_type("IfcBuilding") or [None])[0]
         self.building = b
         self.group = _prop(b, PSET, "PurposeGroup") if b else None
@@ -101,6 +109,12 @@ class Facts:
         self.storeys = sorted(model.by_type("IfcBuildingStorey"), key=lambda s: s.Elevation or 0.0)
         ground = [s for s in self.storeys if (s.Elevation or 0.0) >= -1e-6]
         self.ground_elev = (ground[0].Elevation or 0.0) * self.scale if ground else 0.0
+        self.basements = [s for s in self.storeys if self.is_basement(s)]
+        self.above_ground = [s for s in self.storeys if not self.is_basement(s)]
+        # a roof or services level exported as a storey holds no spaces; it is not a storey of the building
+        with_spaces = {self.storey_of(sp) for sp in model.by_type("IfcSpace")}
+        occupied = [s for s in self.above_ground if s in with_spaces]
+        self.occupied = occupied if occupied else self.above_ground
 
     def storey_of(self, el):
         c = uel.get_container(el) or uel.get_aggregate(el)
@@ -111,19 +125,41 @@ class Facts:
     def elev(self, storey) -> float:
         return (storey.Elevation or 0.0) * self.scale - self.ground_elev
 
+    def is_basement(self, storey) -> bool:
+        return self.elev(storey) < BASEMENT_BELOW_M
+
     def area(self, space) -> float | None:
+        """Declared floor area (Qto_SpaceBaseQuantities) in m2, or None."""
         q = uel.get_psets(space, qtos_only=True).get("Qto_SpaceBaseQuantities", {})
         a = q.get("NetFloorArea", q.get("GrossFloorArea"))
-        return None if a is None else float(a) * self.scale ** 2
+        return None if a is None else float(a) * self.area_scale
 
     def volume(self, space) -> float | None:
+        """Declared volume in m3 (or declared area x height), or None."""
         q = uel.get_psets(space, qtos_only=True).get("Qto_SpaceBaseQuantities", {})
         v = q.get("NetVolume", q.get("GrossVolume"))
         if v is not None:
-            return float(v) * self.scale ** 3
+            return float(v) * self.volume_scale
         a = self.area(space)
         h = q.get("Height", q.get("FinishCeilingHeight"))
         return None if a is None or h is None else a * float(h) * self.scale
+
+    def floor_area(self, space) -> float:
+        """Declared floor area, else the area of the space's geometry, else 0."""
+        a = self.area(space)
+        if a is None:
+            from . import geom
+            fp = geom.footprint(geom.mesh(space))
+            a = fp.area if fp is not None else 0.0
+        return a
+
+    def floor_volume(self, space) -> float | None:
+        """Declared volume, else the volume of the space's geometry, else None."""
+        v = self.volume(space)
+        if v is None:
+            from . import geom
+            v = geom.volume(geom.mesh(space))
+        return v
 
 
 # ---------------------------------------------------------------- rule pass
@@ -144,7 +180,7 @@ def check_rules(model: ifcopenshell.file) -> list[Finding]:
                            f"BuildingHeight not given; using top storey elevation {height:.1f} m "
                            "(lower than the by-law 135(a) height)", "UBBL by-law 135(a)", []))
     height = height or 0.0
-    single = len([s for s in f.storeys if f.elev(s) >= -1e-6]) <= 1
+    single = len(f.occupied) <= 1
     out += _compartments(f, height, single)
     out += _travel(f)
     out += _exits(f)
@@ -153,23 +189,6 @@ def check_rules(model: ifcopenshell.file) -> list[Finding]:
     out += _ninth(f, height)
     out += _systems(f)
     return out
-
-
-def _space_area(f: Facts, sp) -> float:
-    a = f.area(sp)
-    if a is None:
-        from . import geom
-        fp = geom.footprint(geom.mesh(sp))
-        a = fp.area if fp is not None else 0.0
-    return a
-
-
-def _space_volume(f: Facts, sp) -> float | None:
-    v = f.volume(sp)
-    if v is None:
-        from . import geom
-        v = geom.volume(geom.mesh(sp))
-    return v
 
 
 def dimensions(f: Facts) -> dict:
@@ -186,15 +205,15 @@ def dimensions(f: Facts) -> dict:
         st = f.storey_of(sp)
         if st is None:
             continue
-        a = _space_area(f, sp)
-        v = _space_volume(f, sp) or 0.0
+        a = f.floor_area(sp)
+        v = f.floor_volume(sp) or 0.0
         st_area[st.id()] += a
         total_vol += v
         cid = _prop(sp, PSET, "CompartmentId")
         if cid is not None:
             comp_area[(cid, st.id())] += a
             comp_vol[cid] += v
-    above = [s for s in f.storeys if f.elev(s) >= -1.0]
+    above = f.occupied
     by_comp = bool(comp_area)
     return {
         "storey_area": dict(st_area),
@@ -209,6 +228,22 @@ def dimensions(f: Facts) -> dict:
 # element class -> (common pset, kind)
 _STRUCTURE = {"IfcColumn": ("Pset_ColumnCommon", "column"), "IfcBeam": ("Pset_BeamCommon", "beam"),
               "IfcSlab": ("Pset_SlabCommon", "floor"), "IfcWall": ("Pset_WallCommon", "wall")}
+_FLOOR_SLABS = ("FLOOR", "BASESLAB", "NOTDEFINED", "")
+
+
+def _structure(f: Facts):
+    """(element, common pset, kind, storey) for each element of structure the Ninth Schedule covers:
+    columns, beams, floor slabs, and walls that are loadbearing or compartment walls."""
+    for cls, (ps, kind) in _STRUCTURE.items():
+        for el in f.model.by_type(cls):
+            if cls == "IfcSlab" and (el.PredefinedType or "") not in _FLOOR_SLABS:
+                continue
+            if cls == "IfcWall" and not (_prop(el, ps, "LoadBearing") is True
+                                         or _prop(el, ps, "Compartmentation") is True):
+                continue
+            st = f.storey_of(el)
+            if st is not None:
+                yield el, ps, kind, st
 
 
 def _ninth(f: Facts, height):
@@ -223,27 +258,31 @@ def _ninth(f: Facts, height):
                         f"than every Ninth Schedule line for group {f.group} at {height:.1f} m; it must be "
                         "compartmented (see IFC-COMP-AREA / IFC-COMP-VOL), so element periods are not checked",
                         ubbl.NINTH_CLAUSE, [])]
-    basements = {s.id() for s in f.storeys if f.elev(s) < -1.0}
-    ground = min((s for s in f.storeys if f.elev(s) >= -1.0), key=f.elev, default=None)
+    basements = {s.id() for s in f.basements}
+    ground = min(f.above_ground, key=f.elev, default=None)
     over_basement = ground.id() if (basements and ground is not None) else None
     short = defaultdict(list)
-    for cls, (ps, kind) in _STRUCTURE.items():
-        for el in f.model.by_type(cls):
-            if cls == "IfcSlab" and (el.PredefinedType or "") not in ("FLOOR", "BASESLAB", "NOTDEFINED", ""):
-                continue
-            if cls == "IfcWall" and not (_prop(el, ps, "LoadBearing") is True or _prop(el, ps, "Compartmentation") is True):
-                continue
-            st = f.storey_of(el)
-            if st is None:
-                continue
-            have = frp_minutes(_prop(el, ps, "FireRating"))
-            if have is None:
-                continue        # missing ratings are reported by the IDS pack
-            base = st.id() in basements or (kind == "floor" and st.id() == over_basement)
-            barea = d["storey_area"].get(st.id()) if st.id() in basements else None
-            need = ubbl.element_frp(req, kind, base, _prop(el, ps, "Compartmentation") is True, barea)
-            if have < need:
-                short[(st.Name, kind, need)].append((el, have))
+    unread = defaultdict(list)
+    for el, ps, kind, st in _structure(f):
+        compartment = _prop(el, ps, "Compartmentation") is True
+        have = frp_minutes(_prop(el, ps, "FireRating"))
+        if have is None:
+            if not compartment:     # compartment walls and floors: the IDS pack (MY-P08, MY-P09) reports them
+                unread[kind].append(el)
+            continue
+        base = st.id() in basements or (kind == "floor" and st.id() == over_basement)
+        barea = d["storey_area"].get(st.id()) if st.id() in basements else None
+        need = ubbl.element_frp(req, kind, base, compartment, barea)
+        if have < need:
+            short[(st.Name, kind, need)].append((el, have))
+    if unread:
+        n = sum(map(len, unread.values()))
+        out.append(Finding("IFC-FRP-DATA", "warning",
+                           f"{n} element(s) of structure have no FireRating the checker can read "
+                           f"({', '.join(f'{len(v)} {k}' for k, v in sorted(unread.items()))}); their Ninth "
+                           "Schedule period was not checked. Use minutes (60, FRP 60 min, REI 60) or hours (1 HR)",
+                           req.clause, [e.GlobalId for v in unread.values() for e in v],
+                           {"by_kind": {k: len(v) for k, v in unread.items()}}))
     for (storey, kind, need), els in sorted(short.items(), key=lambda kv: (str(kv[0][0]), kv[0][1])):
         worst = min(h for _, h in els)
         out.append(Finding("IFC-FRP", "error",
@@ -268,10 +307,8 @@ def _compartments(f: Facts, height, single):
         st = f.storey_of(sp)
         if cid is None or st is None:
             continue
-        a = f.area(sp)
-        if a is not None:
-            area[(cid, st.Name)] += a
-        v = f.volume(sp)
+        area[(cid, st.Name)] += f.floor_area(sp)
+        v = f.floor_volume(sp)
         if v is None:
             no_vol.add(cid)
         else:
@@ -330,9 +367,10 @@ def _exits(f: Facts):
     load = defaultdict(int)
     doors = defaultdict(list)
     for sp in f.model.by_type("IfcSpace"):
-        st, a = f.storey_of(sp), f.area(sp)
-        if st is None or a is None:
+        st = f.storey_of(sp)
+        if st is None:
             continue
+        a = f.floor_area(sp)
         use = _prop(sp, PSET, "OccupancyUse")
         try:
             load[st.Name] += ubbl.occupant_load(a, f.group, use)
@@ -365,7 +403,7 @@ def _compartment_floors(f: Facts, height):
     if height <= ubbl.COMPARTMENT_FLOOR_HEIGHT_M:
         return out
     for sl in f.model.by_type("IfcSlab"):
-        if (sl.PredefinedType or "") not in ("FLOOR", "BASESLAB", "NOTDEFINED", None):
+        if (sl.PredefinedType or "") not in _FLOOR_SLABS:
             continue
         st = f.storey_of(sl)
         if st is None or f.elev(st) <= ubbl.COMPARTMENT_FLOOR_ABOVE_M:

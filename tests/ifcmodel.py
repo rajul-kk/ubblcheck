@@ -21,7 +21,7 @@ def _qto(m, el, name, props):
 def office(storeys=2, space_area=400.0, comp_split=True, travel=40.0, exit_width=1.2,
            exits_per_storey=2, door_frp="60", wall_frp="60", sprinklered=False,
            group="IV", height=None, storey_h=4.0, slab_comp=True, tags=True, fire_lift=False,
-           breeching=False):
+           breeching=False, roof=False):
     m = ifcopenshell.file(schema="IFC4")
     proj = root.create_entity(m, ifc_class="IfcProject", name="Test")
     unit.assign_unit(m, length={"is_metric": True, "raw": "METRES"})
@@ -77,6 +77,13 @@ def office(storeys=2, space_area=400.0, comp_split=True, travel=40.0, exit_width
             _ps(m, lift, "Pset_TransportElementElevator", {"FireFightingLift": True})
             items.append(lift)
         spatial.assign_container(m, products=items, relating_structure=st)
+    if roof:
+        # a roof level exported as a storey: a roof slab and no spaces
+        st = root.create_entity(m, ifc_class="IfcBuildingStorey", name="Roof")
+        st.Elevation = storeys * storey_h
+        agg.assign_object(m, products=[st], relating_object=bld)
+        rf = root.create_entity(m, ifc_class="IfcSlab", name="RF", predefined_type="ROOF")
+        spatial.assign_container(m, products=[rf], relating_structure=st)
     hyd = root.create_entity(m, ifc_class="IfcFireSuppressionTerminal", name="H1", predefined_type="FIREHYDRANT")
     hyd.Tag = "H1"
     site_items = [hyd]
@@ -87,3 +94,32 @@ def office(storeys=2, space_area=400.0, comp_split=True, travel=40.0, exit_width
         site_items.append(bi)
     spatial.assign_container(m, products=site_items, relating_structure=site)
     return m
+
+
+def to_millimetres(m):
+    """Re-express a metre model the way Revit exports it: lengths in mm, areas in m2, volumes in m3."""
+    for u in m.by_type("IfcUnitAssignment"):
+        m.remove(u)
+    unit.assign_unit(m, length={"is_metric": True, "raw": "MILLIMETERS"},
+                     area={"is_metric": True, "raw": "SQUARE_METERS"},
+                     volume={"is_metric": True, "raw": "CUBIC_METERS"})
+    for st in m.by_type("IfcBuildingStorey"):
+        st.Elevation = (st.Elevation or 0.0) * 1000
+    for d in m.by_type("IfcDoor"):
+        if d.OverallWidth:
+            d.OverallWidth *= 1000
+    for p in m.by_type("IfcPropertySingleValue"):
+        if p.NominalValue is not None and p.NominalValue.is_a("IfcLengthMeasure"):
+            p.NominalValue.wrappedValue *= 1000
+    for q in m.by_type("IfcQuantityLength"):
+        q.LengthValue *= 1000
+    return m
+
+
+def add_column(m, storey_index=0, rating=None, name="C1"):
+    st = sorted(m.by_type("IfcBuildingStorey"), key=lambda s: s.Elevation or 0.0)[storey_index]
+    c = root.create_entity(m, ifc_class="IfcColumn", name=name)
+    if rating is not None:
+        _ps(m, c, "Pset_ColumnCommon", {"FireRating": rating})
+    spatial.assign_container(m, products=[c], relating_structure=st)
+    return c
