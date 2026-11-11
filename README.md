@@ -30,6 +30,24 @@ python -m venv .venv
 .venv/Scripts/pip install -e .[test]                # Windows; .venv/bin/pip elsewhere
 ```
 
+## The web page
+
+```
+.venv/Scripts/pip install -e .[web]
+ubblcheck serve                      # then open http://127.0.0.1:8765
+```
+
+Both checks from a browser. Fill in the project form and add the passive and
+active PDFs, or upload an IFC model. The results page shows each finding with
+its sheet or object and its by-law. You can filter by severity or by text, see
+the travel-distance heatmaps, and download the PDF report, the JSON and (for
+IFC) the BCF file.
+
+Uploads and results are kept under `--work` (a temporary folder by default),
+one folder per check. The page listens on 127.0.0.1 and answers only to
+local host names. It has no log-in, so `--host 0.0.0.0` lets anyone on the
+network upload drawings and read the results.
+
 ## Checking a drawing set
 
 ```

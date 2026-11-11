@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}UBBL pre-check{% endblock %}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="{{ url_for('index') }}"><span class="mark" aria-hidden="true"></span>UBBL pre-check</a>
+  <span class="tag">Bomba fire submissions &middot; UBBL 1984 Parts VII &amp; VIII</span>
+</header>
+<main>
+{% block body %}{% endblock %}
+</main>
+<footer>A pre-submission check, not an approval. It does not replace the submitting person's judgement.</footer>
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

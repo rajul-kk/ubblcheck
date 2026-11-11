@@ -7,10 +7,12 @@ name = "ubblcheck"
 version = "0.1.0"
 description = "Pre-submission checks for Malaysian UBBL 1984 fire (Bomba) submissions: an IFC rule pack and a 2D PDF drawing-set checker"
 requires-python = ">=3.10"
-dependencies = ["ifcopenshell>=0.8", "ifctester>=0.8", "pypdf>=4", "pdfplumber>=0.11", "fpdf2>=2.7", "pyyaml>=6"]
+dependencies = ["ifcopenshell>=0.8", "ifctester>=0.8", "pypdf>=4", "pdfplumber>=0.11", "fpdf2>=2.7", "pyyaml>=6",
+                "numpy", "shapely>=2", "Pillow"]
 
 [project.optional-dependencies]
-test = ["pytest>=7,<9"]
+test = ["pytest>=7,<9", "flask>=3"]
+web = ["flask>=3"]
 
 [project.scripts]
 ubblcheck = "ubblcheck.cli:main"
@@ -19,7 +21,7 @@ ubblcheck = "ubblcheck.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-ubblcheck = ["data/*.yaml", "ids/*.ids"]
+ubblcheck = ["data/*.yaml", "ids/*.ids", "webui/templates/*.html", "webui/static/*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

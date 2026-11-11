@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}{{ meta.project or info.stem }} &middot; UBBL pre-check{% endblock %}
+{% block body %}
+<div class="result-head">
+  <div>
+    <p class="crumb"><a href="{{ url_for('index') }}">&larr; New check</a></p>
+    <h1>{{ meta.project or info.stem }}</h1>
+    <p class="sub">{{ 'IFC model' if info.kind == 'ifc' else 'Drawing set' }} &middot; {{ info.uploads | join(', ') }} &middot; checked {{ info.created }}</p>
+  </div>
+  <div class="downloads">
+    <a class="btn" href="{{ url_for('output', rid=rid, name=info.files.report) }}">PDF report</a>
+    <a class="btn" href="{{ url_for('output', rid=rid, name=info.files.json, dl=1) }}">JSON</a>
+    {% if info.files.bcf %}<a class="btn" href="{{ url_for('output', rid=rid, name=info.files.bcf, dl=1) }}">BCF</a>{% endif %}
+  </div>
+</div>
+
+<div class="summary">
+  {% for s in severities %}
+  <button class="stat {{ s }}" data-filter="{{ s }}" aria-pressed="false">
+    <span class="n">{{ summary[s] }}</span><span class="l">{{ s }}{% if summary[s] != 1 and s != 'info' %}s{% endif %}</span></button>
+  {% endfor %}
+  <input class="search" type="search" placeholder="Filter by rule, text, sheet or by-law" aria-label="Filter findings">
+</div>
+
+<details class="meta"><summary>Inputs</summary>
+  <dl>{% for k, v in meta.items() if k != 'project' and v not in (none, '', []) %}
+    <dt>{{ k.replace('_', ' ') | capitalize }}</dt><dd>{{ v | join(', ') if v is iterable and v is not string else v }}</dd>
+  {% endfor %}</dl>
+</details>
+
+{% if findings %}
+<table class="findings">
+  <thead><tr><th>Severity</th><th>Rule</th><th>Finding</th><th>Where</th></tr></thead>
+  <tbody>
+  {% for f in findings %}
+    <tr data-sev="{{ f.severity }}">
+      <td><span class="sev {{ f.severity }}">{{ f.severity }}</span></td>
+      <td class="rule">{{ f.rule }}</td>
+      <td>{{ f.message }}<div class="basis">{{ f.clause }}</div></td>
+      <td class="where">{% if f.where %}{% if f.where | length > 3 %}<details><summary>{{ f.where | length }} items</summary>{{ f.where | join('; ') }}</details>{% else %}{{ f.where | join('; ') }}{% endif %}{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+<p class="empty" hidden>No findings match the filter.</p>
+{% else %}
+<p class="clean">No findings. The checks that ran found nothing to fix; scanned pages and anything the
+tool cannot read still need a human check.</p>
+{% endif %}
+
+{% if info.heatmaps %}
+<section class="heat">
+  <h2>Travel distance</h2>
+  <p class="sub">Green to amber up to the limit, red beyond it, grey where there is no route, blue at storey exits.</p>
+  <div class="maps">
+  {% for h in info.heatmaps %}
+    <figure><a href="{{ url_for('output', rid=rid, name=h.path) }}"><img src="{{ url_for('output', rid=rid, name=h.path) }}" alt="Travel distance, {{ h.storey }}" loading="lazy"></a>
+      <figcaption>{{ h.storey }}</figcaption></figure>
+  {% endfor %}
+  </div>
+</section>
+{% endif %}
+{% endblock %}

@@ -2,14 +2,13 @@
 ubblcheck pdf PROJECT.yaml [-o OUT]     2D drawing set(s) named in a project form -> JSON, PDF
 ubblcheck ids [DIR]                     write the IFC-MY IDS files
 ubblcheck form [FILE]                   write a blank project form
+ubblcheck serve [--port 8765]           local web page for both checks
 """
 from __future__ import annotations
 
 import argparse
 import os
 import sys
-
-from . import findings as fnd
 
 FORM_TEMPLATE = """\
 # Project form for `ubblcheck pdf`.  Paths are relative to this file.
@@ -28,23 +27,54 @@ sets:
 """
 
 
-def _out(args, name):
-    os.makedirs(args.out, exist_ok=True)
-    return os.path.join(args.out, name)
-
-
-def _finish(fs, args, stem, meta):
-    from . import report
-    j = _out(args, stem + ".json")
-    fnd.to_json(fs, j, meta)
-    p = report.write(fs, _out(args, stem + "-report.pdf"), meta)
-    s = fnd.summary(fs)
+def _report(r) -> int:
+    s = r.summary
     print(f"{s['error']} errors, {s['warning']} warnings, {s['info']} info")
-    print(f"  {j}\n  {p}")
-    return 1 if s["error"] else 0
+    for role in ("bcf", "json", "report"):
+        if role in r.files:
+            print(f"  {r.files[role]}")
+    for p in r.heatmaps:
+        print(f"  {p}")
+    return r.exit_code
 
 
-def main(argv=None):
+def cmd_ifc(args) -> int:
+    from . import run
+    return _report(run.ifc(args.model, args.out, args.ids, rules=not args.no_rules,
+                           geometry=not args.no_geometry, heatmaps=args.heatmaps, cell=args.cell))
+
+
+def cmd_pdf(args) -> int:
+    from . import pdfcheck, run
+    form = pdfcheck.Form.load(args.form)
+    cl = pdfcheck.load_checklist(args.checklist) if args.checklist else None
+    return _report(run.pdf(form, args.out, cl, stem=os.path.splitext(os.path.basename(args.form))[0]))
+
+
+def cmd_ids(args) -> int:
+    from . import ids_build
+    for p in ids_build.build(args.dir):
+        print(p)
+    return 0
+
+
+def cmd_form(args) -> int:
+    if os.path.exists(args.file):
+        print(f"{args.file} exists; not overwritten", file=sys.stderr)
+        return 2
+    with open(args.file, "w", encoding="utf-8") as fh:
+        fh.write(FORM_TEMPLATE)
+    print(args.file)
+    return 0
+
+
+def cmd_serve(args) -> int:
+    from . import web
+    web.serve(args.host, args.port, args.work)
+    return 0
+
+
+def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="ubblcheck", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -56,54 +86,29 @@ def main(argv=None):
     a.add_argument("--no-geometry", action="store_true", help="skip geometric rules (travel, access, ...)")
     a.add_argument("--cell", type=float, default=0.2, help="travel grid cell in metres (default 0.2)")
     a.add_argument("--heatmaps", action="store_true", help="write a travel-distance PNG per storey")
+    a.set_defaults(func=cmd_ifc)
     b = sub.add_parser("pdf")
     b.add_argument("form")
     b.add_argument("-o", "--out", default="out")
     b.add_argument("--checklist", help="alternative checklist.yaml")
+    b.set_defaults(func=cmd_pdf)
     c = sub.add_parser("ids")
     c.add_argument("dir", nargs="?", default="ids")
+    c.set_defaults(func=cmd_ids)
     d = sub.add_parser("form")
     d.add_argument("file", nargs="?", default="project.yaml")
-    args = ap.parse_args(argv)
+    d.set_defaults(func=cmd_form)
+    e = sub.add_parser("serve", help="local web page (needs the [web] extra)")
+    e.add_argument("--host", default="127.0.0.1")
+    e.add_argument("--port", type=int, default=8765)
+    e.add_argument("--work", help="folder for uploads and results (default: a temporary folder)")
+    e.set_defaults(func=cmd_serve)
+    return ap
 
-    if args.cmd == "ids":
-        from . import ids_build
-        for p in ids_build.build(args.dir):
-            print(p)
-        return 0
-    if args.cmd == "form":
-        if os.path.exists(args.file):
-            print(f"{args.file} exists; not overwritten", file=sys.stderr)
-            return 2
-        with open(args.file, "w", encoding="utf-8") as fh:
-            fh.write(FORM_TEMPLATE)
-        print(args.file)
-        return 0
-    if args.cmd == "ifc":
-        from . import ifccheck
-        fs = ifccheck.check(args.model, args.ids, rules=not args.no_rules)
-        if not args.no_rules and not args.no_geometry:
-            import ifcopenshell
-            from . import georules
-            heat = _out(args, "heatmaps") if args.heatmaps else None
-            fs += georules.check(ifcopenshell.open(args.model), heat_dir=heat, cell=args.cell)
-        stem = os.path.splitext(os.path.basename(args.model))[0]
-        n = fnd.to_bcf(fs, _out(args, stem + ".bcf"))
-        print(f"  {_out(args, stem + '.bcf')} ({n} topics)")
-        return _finish(fs, args, stem, {"project": stem, "model": os.path.basename(args.model)})
-    if args.cmd == "pdf":
-        from . import pdfcheck
-        form = pdfcheck.Form.load(args.form)
-        cl = pdfcheck.load_checklist(args.checklist) if args.checklist else None
-        fs, sheets = pdfcheck.check(form, cl)
-        meta = {"project": form.project, "state": form.state, "purpose_group": form.purpose_group,
-                "sprinklered": "yes" if form.sprinklered else "no", "submission": form.submission,
-                "sheets_read": f"{len(sheets)} ({sum(s.set == 'passive' for s in sheets)} passive, "
-                               f"{sum(s.set == 'active' for s in sheets)} active)",
-                "files": [os.path.basename(p) for ps in form.sets.values() for p in ps]}
-        stem = os.path.splitext(os.path.basename(args.form))[0]
-        return _finish(fs, args, stem, meta)
-    return 2
+
+def main(argv=None):
+    args = parser().parse_args(argv)
+    return args.func(args)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block body %}
+{% if error %}<div class="alert" role="alert">{{ error }}</div>{% endif %}
+
+<div class="tabs" role="tablist">
+  <button role="tab" class="tab" data-tab="pdf" aria-selected="true">Drawing set (PDF)</button>
+  <button role="tab" class="tab" data-tab="ifc" aria-selected="false">IFC model</button>
+</div>
+
+<section class="panel" id="tab-pdf" role="tabpanel">
+  <p class="lede">Checks the passive and active PDF sets against the IPM item lists: missing items,
+  passive and active sets that disagree, yellow road left on active sheets, ramp gradients and
+  annotated travel distances. The PDFs must be vector exports with a text layer.</p>
+  <form method="post" action="{{ url_for('check_pdf') }}" enctype="multipart/form-data" class="grid">
+    <label class="wide">Project
+      <input name="project" value="{{ form.project or '' }}" placeholder="Proposed 4-storey office, Lot 123, Mukim X"></label>
+    <label>State
+      <input name="state" list="states" value="{{ form.state or '' }}" placeholder="Selangor">
+      <small>Ramps: 1:15 in Selangor, 1:12 elsewhere</small></label>
+    <datalist id="states">{% for s in ["Johor","Kedah","Kelantan","Melaka","Negeri Sembilan","Pahang","Perak","Perlis","Pulau Pinang","Sabah","Sarawak","Selangor","Terengganu","Kuala Lumpur","Putrajaya","Labuan"] %}<option value="{{ s }}">{% endfor %}</datalist>
+    <label>Purpose group
+      <select name="purpose_group" id="group">
+        {% for g, name in groups.items() %}<option value="{{ g }}" {% if (form.purpose_group or 'IV') == g %}selected{% endif %}>{{ g }} &middot; {{ name }}</option>{% endfor %}
+      </select></label>
+    <label>Sub-use
+      <select name="sub_use" id="sub_use" data-selected="{{ form.sub_use or '' }}">
+        <option value="">(the group's main row)</option>
+        {% for g, uses in sub_uses.items() %}{% for u in uses %}<option value="{{ u }}" data-group="{{ g }}">{{ u.replace('_', ' ') }}</option>{% endfor %}{% endfor %}
+      </select><small>Seventh Schedule row, where the group has several</small></label>
+    <label class="check"><input type="checkbox" name="sprinklered" {% if form.sprinklered %}checked{% endif %}> Sprinklered throughout</label>
+    <label>Topmost floor height (m)
+      <input name="top_floor_m" inputmode="decimal" value="{{ form.top_floor_m or '' }}" placeholder="14.0">
+      <small>Above fire appliance access level (by-law 229)</small></label>
+    <label>Building volume (m³)
+      <input name="volume_m3" inputmode="decimal" value="{{ form.volume_m3 or '' }}" placeholder="18000">
+      <small>By-law 140</small></label>
+    <label>Submission
+      <select name="submission">
+        {% for s in submissions %}<option value="{{ s }}" {% if (form.submission or 'passive') == s %}selected{% endif %}>{{ s }}</option>{% endfor %}
+      </select></label>
+    <label>Passive approval reference
+      <input name="passive_approval_ref" value="{{ form.passive_approval_ref or '' }}" placeholder="Needed for an active submission"></label>
+    <label class="drop">Passive set
+      <input type="file" name="passive" accept=".pdf,application/pdf" multiple>
+      <small>Architect's drawings, one or more PDFs</small></label>
+    <label class="drop">Active set
+      <input type="file" name="active" accept=".pdf,application/pdf" multiple>
+      <small>M&amp;E engineer's drawings</small></label>
+    <div class="wide actions"><button type="submit" class="primary">Check drawings</button>
+      <span class="busy" hidden>Reading drawings&hellip;</span></div>
+  </form>
+</section>
+
+<section class="panel" id="tab-ifc" role="tabpanel" hidden>
+  <p class="lede">Runs the IFC-MY rule pack (does the model carry the fire data?), the UBBL schedule
+  rules (does the data comply?) and, from the geometry, walking travel distances, fire appliance
+  access and hydrant reach. Findings come back with a BCF file to open in Revit or ArchiCAD.</p>
+  <form method="post" action="{{ url_for('check_ifc') }}" enctype="multipart/form-data" class="grid">
+    <label class="drop wide">IFC model
+      <input type="file" name="model" accept=".ifc" required></label>
+    <label class="check"><input type="checkbox" name="geometry" checked> Measure from geometry (travel, access, hydrants)</label>
+    <label class="check"><input type="checkbox" name="heatmaps" checked> Travel-distance heatmaps</label>
+    <label>Travel grid cell (m)
+      <input name="cell" inputmode="decimal" value="0.2"><small>Smaller is slower and more exact</small></label>
+    <div class="wide actions"><button type="submit" class="primary">Check model</button>
+      <span class="busy" hidden>Checking the model; large models take a few minutes&hellip;</span></div>
+  </form>
+</section>
+
+{% if recent %}
+<section class="recent">
+  <h2>Recent checks</h2>
+  <ul>
+  {% for r in recent %}
+    <li><a href="{{ url_for('result', rid=r.rid) }}">{{ r.uploads | join(', ') }}</a>
+      <span class="when">{{ r.created }}</span>
+      <span class="counts"><span class="sev error">{{ r.summary.error }}</span><span class="sev warning">{{ r.summary.warning }}</span><span class="sev info">{{ r.summary.info }}</span></span></li>
+  {% endfor %}
+  </ul>
+</section>
+{% endif %}
+{% endblock %}
