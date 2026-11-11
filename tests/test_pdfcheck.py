@@ -139,3 +139,14 @@ def test_bad_form_values_are_errors(tmp_path):
     fs, _ = run(tmp_path, with_active=False, purpose_group="IX", submission="later")
     bad = {f.detail["field"] for f in fs if f.rule == "PDF-FORM" and f.severity == "error"}
     assert bad == {"purpose_group", "submission"}
+
+
+def test_submission_types_follow_their_rules(tmp_path):
+    fs, _ = run(tmp_path, submission="both", passive_approval_ref=None)
+    order = [f for f in fs if f.rule == "PDF-ORDER"]
+    assert [f.severity for f in order] == ["warning"]           # together is allowed; approval not needed
+    fs, _ = run(tmp_path, with_active=False, submission="both")
+    sets = [f for f in fs if f.rule == "PDF-SET"]
+    assert len(sets) == 1 and "no active set" in sets[0].message
+    fs, _ = run(tmp_path, with_active=False, submission="active")
+    assert {f.rule for f in fs} >= {"PDF-ORDER", "PDF-SET"}

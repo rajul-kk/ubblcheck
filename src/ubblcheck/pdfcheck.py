@@ -23,7 +23,20 @@ DATA = os.path.join(os.path.dirname(__file__), "data", "checklist.yaml")
 COLOUR_MIN = 40.0     # points of coloured linework before a colour counts as drawn
 
 
-SUBMISSIONS = ("passive", "active", "both")
+@dataclass(frozen=True)
+class SubmissionRule:
+    """What a submission type sends to Bomba, and the order it has to follow (IPM guide)."""
+    sets: tuple             # drawing sets it must include
+    needs_approval: bool    # the passive approval reference must already exist
+    together: bool          # passive and active in one go: allowed, but Bomba approves passive first
+
+
+SUBMISSION_RULES = {
+    "passive": SubmissionRule(("passive",), needs_approval=False, together=False),
+    "active": SubmissionRule(("active",), needs_approval=True, together=False),
+    "both": SubmissionRule(("passive", "active"), needs_approval=False, together=True),
+}
+SUBMISSIONS = tuple(SUBMISSION_RULES)
 SETS = ("passive", "active")
 NUMBER_FIELDS = {"top_floor_m": "topmost floor height", "volume_m3": "building volume"}
 _YES = {"yes", "y", "true", "1", "ya"}
@@ -209,14 +222,24 @@ def consistency(sheets: list[pdfread.Sheet], checklist: dict) -> list[Finding]:
     def key(s):
         return (s.kind, s.level if s.kind == "floor_plan" else None)
 
-    pk = defaultdict(list)
-    ak = defaultdict(list)
-    for s in pas:
-        if s.kind in ("floor_plan", "site_plan"):
-            pk[key(s)].append(s)
-    for s in act:
-        if s.kind in ("floor_plan", "site_plan"):
-            ak[key(s)].append(s)
+    def plans(set_sheets):
+        by = defaultdict(list)
+        for s in set_sheets:
+            if s.kind in ("floor_plan", "site_plan"):
+                by[key(s)].append(s)
+        return by
+
+    def tags(set_sheets):
+        out = defaultdict(set)
+        for s in set_sheets:
+            for t, v in tags_on(s, checklist["tags"]).items():
+                out[t] |= v
+        return out
+
+    def areas(set_sheets):
+        return {m.group(1).replace(",", "") for s in set_sheets for m in AREA.finditer(s.text)}
+
+    pk, ak = plans(pas), plans(act)
 
     def label(k):
         return "site plan" if k[0] == "site_plan" else f"floor plan {k[1] or '(level unknown)'}"
@@ -230,14 +253,7 @@ def consistency(sheets: list[pdfread.Sheet], checklist: dict) -> list[Finding]:
             out.append(Finding("PDF-X-SHEET", "warning", f"Active {label(k)} has no passive counterpart",
                                basis, [s.ref for s in ak[k]]))
             continue
-        ptags = defaultdict(set)
-        atags = defaultdict(set)
-        for s in pk[k]:
-            for t, v in tags_on(s, checklist["tags"]).items():
-                ptags[t] |= v
-        for s in ak[k]:
-            for t, v in tags_on(s, checklist["tags"]).items():
-                atags[t] |= v
+        ptags, atags = tags(pk[k]), tags(ak[k])
         refs = [s.ref for s in pk[k] + ak[k]]
         for t in checklist["tags"]:
             only_p, only_a = ptags[t] - atags[t], atags[t] - ptags[t]
@@ -251,8 +267,7 @@ def consistency(sheets: list[pdfread.Sheet], checklist: dict) -> list[Finding]:
                                    f"{label(k)}: {t.replace('_', ' ')} tags differ ({'; '.join(parts)})",
                                    basis, refs, {"tag": t, "passive_only": sorted(only_p),
                                                  "active_only": sorted(only_a)}))
-        pa = {m.group(1).replace(",", "") for s in pk[k] for m in AREA.finditer(s.text)}
-        aa = {m.group(1).replace(",", "") for s in ak[k] for m in AREA.finditer(s.text)}
+        pa, aa = areas(pk[k]), areas(ak[k])
         if pa and aa and pa != aa:
             out.append(Finding("PDF-X-AREA", "warning",
                                f"{label(k)}: area figures differ (passive {', '.join(sorted(pa - aa)) or '-'}; "
@@ -312,17 +327,19 @@ def numbers(sheets: list[pdfread.Sheet], form: Form, checklist: dict) -> list[Fi
 
 def procedure(sheets: list[pdfread.Sheet], form: Form) -> list[Finding]:
     out = []
-    order = "IPM: the active set is submitted by the M&E engineer after passive approval"
-    if form.submission == "active" and not form.passive_approval_ref:
-        out.append(Finding("PDF-ORDER", "error",
-                           "Active submission without a passive approval reference", order, []))
-    if form.submission == "both":
-        out.append(Finding("PDF-ORDER", "warning",
-                           "Passive and active sets submitted together; Bomba approves passive first", order, []))
-    for st in ("passive", "active"):
-        if form.submission in (st, "both") and not any(s.set == st for s in sheets):
-            out.append(Finding("PDF-SET", "error", f"Submission is {form.submission} but no {st} set was given",
-                               "Project form", []))
+    rule = SUBMISSION_RULES.get(form.submission)      # unknown types: Form.problems() reports them
+    if rule is not None:
+        order = "IPM: the active set is submitted by the M&E engineer after passive approval"
+        if rule.needs_approval and not form.passive_approval_ref:
+            out.append(Finding("PDF-ORDER", "error",
+                               "Active submission without a passive approval reference", order, []))
+        if rule.together:
+            out.append(Finding("PDF-ORDER", "warning",
+                               "Passive and active sets submitted together; Bomba approves passive first", order, []))
+        for st in rule.sets:
+            if not any(s.set == st for s in sheets):
+                out.append(Finding("PDF-SET", "error", f"Submission is {form.submission} but no {st} set was given",
+                                   "Project form", []))
     for s in sheets:
         if s.set == "active" and s.kind in ("floor_plan", "site_plan") and s.colours.get("yellow", 0) >= COLOUR_MIN:
             out.append(Finding("PDF-YELLOW", "error",
