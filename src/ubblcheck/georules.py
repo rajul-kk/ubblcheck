@@ -134,55 +134,63 @@ def _travel(f: Facts, plans, heat_dir, cell):
         for sp, poly in pl.spaces:
             rd = [o for d, o in pl.doors if o.buffer(travel.CLEARANCE).intersects(poly)]
             r = travel.space_travel(fld, poly, rd)
-            if r is None:
-                continue
-            nm = sp.Name or sp.GlobalId
-            tol = fld.tolerance(lim.travel_m)
-            area = poly.area
-            small = False
-            try:
-                small = ubbl.occupant_load(area, f.group, _prop(sp, PSET, "OccupancyUse")) <= ROOM_PERSONS
-            except KeyError:
-                pass
-            if r.unreachable > 0.05:
-                out.append(Finding("GEO-NOROUTE", "warning",
-                                   f"{pl.name} {nm}: {r.unreachable:.0%} of the floor has no route to an exit "
-                                   "(missing door, or door not cut into its wall?)",
-                                   "UBBL by-law 165(1)", [sp.GlobalId], {"unreachable": r.unreachable}))
-            measured, how = r.max_m, "from the most remote point"
-            if small and r.door_m is not None and r.in_room_m is not None:
-                measured, how = r.door_m, "from the room door (room for 6 or fewer, by-law 165(3))"
-                if r.in_room_m > ubbl.ROOM_TRAVEL_M:
-                    out.append(Finding("GEO-ROOM", "error",
-                                       f"{pl.name} {nm}: {r.in_room_m:.1f} m from the remote point to the room door "
-                                       f"exceeds {ubbl.ROOM_TRAVEL_M} m", "UBBL by-law 165(3)", [sp.GlobalId]))
-            if not math.isfinite(measured):
-                continue
-            detail = {"travel_m": round(measured, 2), "limit_m": lim.travel_m, "tolerance_m": round(tol, 2)}
-            if measured > lim.travel_m + tol:
-                out.append(Finding("GEO-TRAVEL", "error",
-                                   f"{pl.name} {nm}: walking distance {how} is {measured:.1f} m; "
-                                   f"limit {lim.travel_m:g} m", lim.clause, [sp.GlobalId], detail))
-            elif measured > lim.travel_m:
-                out.append(Finding("GEO-TRAVEL", "warning",
-                                   f"{pl.name} {nm}: walking distance {measured:.1f} m is over the {lim.travel_m:g} m "
-                                   f"limit by less than the method tolerance ({tol:.1f} m); measure by hand",
-                                   lim.clause, [sp.GlobalId], detail))
-            declared = _prop(sp, PSET, "MaxTravelDistance")
-            if declared is not None and measured > float(declared) * f.scale + tol:
-                out.append(Finding("GEO-DECLARED", "warning",
-                                   f"{pl.name} {nm}: declared travel distance {float(declared) * f.scale:.1f} m, "
-                                   f"measured {measured:.1f} m", "UBBL by-law 165(1)", [sp.GlobalId], detail))
-            if (open_plan or _prop(sp, PSET, "OpenPlan") is True) and \
-                    r.direct_m > ubbl.DIRECT_DISTANCE_FRACTION * lim.travel_m + fld.cell:
-                out.append(Finding("GEO-DIRECT", "error",
-                                   f"{pl.name} {nm}: open-plan direct distance {r.direct_m:.1f} m exceeds two-thirds "
-                                   f"of {lim.travel_m:g} m", "UBBL by-law 165(2)", [sp.GlobalId]))
-            q = f.area(sp)
-            if q is not None and abs(q - area) > max(0.05 * area, 0.5):
-                out.append(Finding("GEO-AREA", "warning",
-                                   f"{pl.name} {nm}: declared floor area {q:.1f} m2, geometry gives {area:.1f} m2",
-                                   "UBBL by-law 135(b)", [sp.GlobalId]))
+            if r is not None:
+                out += _space_travel_findings(f, f"{pl.name} {sp.Name or sp.GlobalId}", sp, poly, r, fld, lim,
+                                              open_plan or _prop(sp, PSET, "OpenPlan") is True)
+    return out
+
+
+def _small_room(f: Facts, sp, area) -> bool:
+    """A room for ROOM_PERSONS or fewer, which by-law 165(3) measures from its door."""
+    try:
+        return ubbl.occupant_load(area, f.group, _prop(sp, PSET, "OccupancyUse")) <= ROOM_PERSONS
+    except KeyError:
+        return False
+
+
+def _space_travel_findings(f: Facts, nm, sp, poly, r, fld, lim, open_plan) -> list[Finding]:
+    """By-law 165 findings for one space, from its measured travel r (travel.SpaceTravel)."""
+    out = []
+    gid = [sp.GlobalId]
+    tol = fld.tolerance(lim.travel_m)
+    if r.unreachable > 0.05:
+        out.append(Finding("GEO-NOROUTE", "warning",
+                           f"{nm}: {r.unreachable:.0%} of the floor has no route to an exit "
+                           "(missing door, or door not cut into its wall?)",
+                           "UBBL by-law 165(1)", gid, {"unreachable": r.unreachable}))
+    measured, how = r.max_m, "from the most remote point"
+    if _small_room(f, sp, poly.area) and r.door_m is not None and r.in_room_m is not None:
+        measured, how = r.door_m, "from the room door (room for 6 or fewer, by-law 165(3))"
+        if r.in_room_m > ubbl.ROOM_TRAVEL_M:
+            out.append(Finding("GEO-ROOM", "error",
+                               f"{nm}: {r.in_room_m:.1f} m from the remote point to the room door "
+                               f"exceeds {ubbl.ROOM_TRAVEL_M} m", "UBBL by-law 165(3)", gid))
+    if not math.isfinite(measured):
+        return out
+    detail = {"travel_m": round(measured, 2), "limit_m": lim.travel_m, "tolerance_m": round(tol, 2)}
+    if measured > lim.travel_m + tol:
+        out.append(Finding("GEO-TRAVEL", "error",
+                           f"{nm}: walking distance {how} is {measured:.1f} m; limit {lim.travel_m:g} m",
+                           lim.clause, gid, detail))
+    elif measured > lim.travel_m:
+        out.append(Finding("GEO-TRAVEL", "warning",
+                           f"{nm}: walking distance {measured:.1f} m is over the {lim.travel_m:g} m "
+                           f"limit by less than the method tolerance ({tol:.1f} m); measure by hand",
+                           lim.clause, gid, detail))
+    declared = _prop(sp, PSET, "MaxTravelDistance")
+    if declared is not None and measured > float(declared) * f.scale + tol:
+        out.append(Finding("GEO-DECLARED", "warning",
+                           f"{nm}: declared travel distance {float(declared) * f.scale:.1f} m, "
+                           f"measured {measured:.1f} m", "UBBL by-law 165(1)", gid, detail))
+    if open_plan and r.direct_m > ubbl.DIRECT_DISTANCE_FRACTION * lim.travel_m + fld.cell:
+        out.append(Finding("GEO-DIRECT", "error",
+                           f"{nm}: open-plan direct distance {r.direct_m:.1f} m exceeds two-thirds "
+                           f"of {lim.travel_m:g} m", "UBBL by-law 165(2)", gid))
+    q, area = f.area(sp), poly.area
+    if q is not None and abs(q - area) > max(0.05 * area, 0.5):
+        out.append(Finding("GEO-AREA", "warning",
+                           f"{nm}: declared floor area {q:.1f} m2, geometry gives {area:.1f} m2",
+                           "UBBL by-law 135(b)", gid))
     return out
 
 
@@ -274,10 +282,7 @@ def _groups(f: Facts):
         g = use_group(sp)
         if g is None:
             continue
-        a = f.area(sp)
-        if a is None:
-            fp = geom.footprint(geom.mesh(sp))
-            a = fp.area if fp is not None else 0.0
+        a = f.floor_area(sp)
         by_group[g] += a
         cid = _prop(sp, PSET, "CompartmentId")
         if cid is not None:
@@ -310,19 +315,11 @@ def _groups(f: Facts):
 
 def _basement(f: Facts):
     out = []
-    below = [s for s in f.storeys if f.elev(s) < -1.0]
-    if not below:
+    if not f.basements:
         return out
-    ground = min((s for s in f.storeys if f.elev(s) >= -1.0), key=f.elev, default=None)
-    for b in below:
-        area = 0.0
-        for sp in f.model.by_type("IfcSpace"):
-            if f.storey_of(sp) == b:
-                a = f.area(sp)
-                if a is None:
-                    fp = geom.footprint(geom.mesh(sp))
-                    a = fp.area if fp is not None else 0.0
-                area += a
+    ground = min(f.above_ground, key=f.elev, default=None)
+    for b in f.basements:
+        area = sum(f.floor_area(sp) for sp in f.model.by_type("IfcSpace") if f.storey_of(sp) == b)
         if area <= 100:
             continue
         above = min((s for s in f.storeys if f.elev(s) > f.elev(b)), key=f.elev, default=ground)

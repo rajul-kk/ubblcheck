@@ -488,9 +488,12 @@ def default_ids() -> list[str]:
     return [os.path.join(d, n) for n in ("my-ubbl-passive.ids", "my-ubbl-active.ids")]
 
 
-def check(path: str, ids_paths: list[str] | None = None, rules: bool = True) -> list[Finding]:
-    model = ifcopenshell.open(path)
+def check_model(model: ifcopenshell.file, ids_paths: list[str] | None = None, rules: bool = True) -> list[Finding]:
     out = run_ids(model, ids_paths if ids_paths is not None else default_ids())
     if rules:
         out += check_rules(model)
     return out
+
+
+def check(path: str, ids_paths: list[str] | None = None, rules: bool = True) -> list[Finding]:
+    return check_model(ifcopenshell.open(path), ids_paths, rules)
