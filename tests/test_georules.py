@@ -145,7 +145,8 @@ def test_narrow_access_and_far_hydrant():
 
 @pytest.mark.parametrize("name,group", [("Open office", "IV"), ("Bilik Tidur 2", "III"), ("Kedai 3", "V"),
                                         ("Surau", "VII"), ("Car park", "VIII"), ("Corridor", None),
-                                        ("Male toilet", None), ("Ward 4B", "II")])
+                                        ("Male toilet", None), ("Ward 4B", "II"), ("Hallway", None),
+                                        ("Entry hall", None), ("Foyer", None), ("Multi-purpose hall", "VII")])
 def test_use_words(name, group):
     class S:
         Name, LongName, ObjectType = name, None, None
@@ -167,7 +168,16 @@ def test_basement_floor_must_be_compartment():
     G.box_floor(md, b, 20, 10, z=-3.5, exits=((0, 2.0), (0, 18.0)), name="Car park")
     g = md.storey("L0", 0.0)
     G.box_floor(md, g, 20, 10, exits=((0, 2.0), (0, 18.0)))
-    assert rules(georules.check(md.m))["GEO-BASEMENT"] == 1
+    sev = lambda: [x.severity for x in georules.check(md.m) if x.rule == "GEO-BASEMENT"]
+    assert sev() == ["error"]                   # declared not a compartment floor
+    import ifcopenshell.api.pset as pset
+    import ifcopenshell.util.element as ue
+    sl = next(s for s in md.m.by_type("IfcSlab") if s.Name == "L0-SL")
+    ps = md.m.by_id(ue.get_psets(sl)["Pset_SlabCommon"]["id"])
+    pset.edit_pset(md.m, pset=ps, properties={"Compartmentation": None})
+    assert sev() == ["warning"]                 # not declared: ask, don't accuse
+    pset.edit_pset(md.m, pset=ps, properties={"Compartmentation": True})
+    assert sev() == []
 
 
 def test_heatmap(tmp_path):

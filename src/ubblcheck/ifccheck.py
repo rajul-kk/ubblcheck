@@ -81,6 +81,38 @@ def run_ids(model: ifcopenshell.file, ids_paths: list[str]) -> list[Finding]:
 
 # ---------------------------------------------------------------- model facts
 
+def objects(model, cls: str, types) -> list:
+    """Occurrences of `cls` whose predefined type, their own or their type object's, is in `types`.
+    IFC2X3 has no occurrence class for most fire objects (a sprinkler is an IfcFlowTerminal there),
+    so in that schema the type object (`cls` + "Type") decides."""
+    types = set(types)
+    try:
+        return [e for e in model.by_type(cls) if (uel.get_predefined_type(e) or "") in types]
+    except RuntimeError:            # class not in this schema
+        pass
+    try:
+        typed = model.by_type(cls + "Type")
+    except RuntimeError:
+        return []
+    return [e for t in typed if (t.PredefinedType or "") in types for e in uel.get_types(t)]
+
+
+_VOID = re.compile(r"open to below|void|terbuka ke bawah|double (height|volume)|upper part of", re.I)
+
+
+def not_floor(space) -> bool:
+    """A space that is not floor area: a void or double-height volume drawn as a room, or a gross-area
+    zone (IfcSpace GFA, as Revit exports area plans) that would count the rooms inside it twice."""
+    if (getattr(space, "PredefinedType", None) or "") == "GFA":
+        return True
+    return any(_VOID.search(x) for x in (space.Name, getattr(space, "LongName", None)) if x)
+
+
+def exits_declared(f: "Facts") -> bool:
+    """Does any door say whether it is a fire exit?  When none does, exit checks have nothing to go on."""
+    return any(_prop(d, "Pset_DoorCommon", "FireExit") is not None for d in f.model.by_type("IfcDoor"))
+
+
 def _prop(el, pset, name, default=None):
     return uel.get_psets(el).get(pset, {}).get(name, default)
 
@@ -112,8 +144,9 @@ class Facts:
         self.ground_elev = (ground[0].Elevation or 0.0) * self.scale if ground else 0.0
         self.basements = [s for s in self.storeys if self.is_basement(s)]
         self.above_ground = [s for s in self.storeys if not self.is_basement(s)]
-        # a roof or services level exported as a storey holds no spaces; it is not a storey of the building
-        with_spaces = {self.storey_of(sp) for sp in model.by_type("IfcSpace")}
+        # a roof or services level exported as a storey holds no spaces (or only voids); it is not a
+        # storey of the building
+        with_spaces = {self.storey_of(sp) for sp in model.by_type("IfcSpace") if not not_floor(sp)}
         occupied = [s for s in self.above_ground if s in with_spaces]
         self.occupied = occupied if occupied else self.above_ground
 
@@ -146,7 +179,9 @@ class Facts:
         return None if a is None or h is None else a * float(h) * self.scale
 
     def floor_area(self, space) -> float:
-        """Declared floor area, else the area of the space's geometry, else 0."""
+        """Declared floor area, else the area of the space's geometry, else 0.  Voids count as 0."""
+        if not_floor(space):
+            return 0.0
         a = self.area(space)
         if a is None:
             from . import geom
@@ -155,7 +190,9 @@ class Facts:
         return a
 
     def floor_volume(self, space) -> float | None:
-        """Declared volume, else the volume of the space's geometry, else None."""
+        """Declared volume, else the volume of the space's geometry, else None.  Voids count as 0."""
+        if not_floor(space):
+            return 0.0
         v = self.volume(space)
         if v is None:
             from . import geom
@@ -170,7 +207,9 @@ def check_rules(model: ifcopenshell.file) -> list[Finding]:
     out: list[Finding] = []
     if f.group not in ubbl.PURPOSE_GROUPS:
         out.append(Finding("IFC-GROUP", "error",
-                           f"Building purpose group is {f.group!r}; rules need one of I-VIII",
+                           (f"Building purpose group {f.group!r} is not one of I-VIII" if f.group else
+                            "Building purpose group is not declared (MY_FireSafety.PurposeGroup); the UBBL "
+                            "rules that depend on it were skipped"),
                            "UBBL by-law 134, Fifth Schedule",
                            [f.building.GlobalId] if f.building else []))
         return out
@@ -440,6 +479,10 @@ def _exits(f: Facts):
     out = []
     if f.group not in ubbl.EXIT_CAPACITY:
         return out
+    if not exits_declared(f):
+        return [Finding("IFC-EXIT-DATA", "warning", "No door states whether it is a fire exit "
+                        "(Pset_DoorCommon.FireExit); exit count and width were not checked",
+                        "UBBL by-law 175-177", [])]
     load = defaultdict(int)
     doors = defaultdict(list)
     for sp in f.model.by_type("IfcSpace"):
@@ -527,7 +570,7 @@ def _fire_doors(f: Facts):
 
 
 def _terminals(f: Facts, ptype):
-    return [t for t in f.model.by_type("IfcFireSuppressionTerminal") if (t.PredefinedType or "") == ptype]
+    return objects(f.model, "IfcFireSuppressionTerminal", (ptype,))
 
 
 def _systems(f: Facts):
@@ -606,7 +649,7 @@ def _tenth(f: Facts, height: float) -> list[Finding]:
                            row.clause, gid, detail))
     for code, (cls, types, what) in _TENTH_OBJECTS.items():
         # sprinklers: IFC-TENTH-A above when undeclared, IFC-SPRINKLER when declared but no heads
-        if row.requires(code) and not [e for e in f.model.by_type(cls) if (e.PredefinedType or "") in types]:
+        if row.requires(code) and not objects(f.model, cls, types):
             out.append(Finding(f"IFC-TENTH-{code}", "warning",
                                f"{where} requires {ubbl.EXTINGUISHING.get(code) or ubbl.ALARMS[code]}; the model has "
                                f"no {what} (fine for an architectural model; needed in the active model)",

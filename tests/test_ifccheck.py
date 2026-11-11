@@ -199,3 +199,52 @@ def test_tenth_schedule_needs_the_room_count_for_hotels():
     ifcmodel._ps(m, b, "MY_FireSafety", {"SubUse": "hotel"})
     t = [f for f in ifccheck.check_rules(m) if f.rule == "IFC-TENTH"]
     assert len(t) == 1 and t[0].severity == "info" and t[0].detail["missing"] == ["rooms"]
+
+
+def test_fire_objects_found_through_their_type_in_ifc2x3():
+    # IFC2X3 has no IfcFireSuppressionTerminal occurrence: a hose reel is an IfcFlowTerminal typed by
+    # an IfcFireSuppressionTerminalType.  Asking for the IFC4 class must not crash.
+    import ifcopenshell
+    import ifcopenshell.guid as guid
+    m = ifcopenshell.file(schema="IFC2X3")
+    t = m.create_entity("IfcFireSuppressionTerminalType", GlobalId=guid.new(), Name="HR",
+                        PredefinedType="HOSEREEL")
+    hr = m.create_entity("IfcFlowTerminal", GlobalId=guid.new(), Name="HR1")
+    m.create_entity("IfcRelDefinesByType", GlobalId=guid.new(), RelatedObjects=[hr], RelatingType=t)
+    assert ifccheck.objects(m, "IfcFireSuppressionTerminal", ("HOSEREEL",)) == [hr]
+    assert ifccheck.objects(m, "IfcFireSuppressionTerminal", ("FIREHYDRANT",)) == []
+    assert ifccheck.objects(m, "IfcSensor", ("SMOKESENSOR",)) == []
+
+
+def test_ifc4_type_object_supplies_the_predefined_type():
+    m = ifcmodel.office()
+    import ifcopenshell.api.root as root
+    import ifcopenshell.api.spatial as spatial
+    import ifcopenshell.api.type as typ
+    t = root.create_entity(m, ifc_class="IfcSensorType", predefined_type="SMOKESENSOR")
+    sd = root.create_entity(m, ifc_class="IfcSensor", name="SD1")
+    typ.assign_type(m, related_objects=[sd], relating_type=t)
+    spatial.assign_container(m, products=[sd], relating_structure=m.by_type("IfcBuildingStorey")[0])
+    assert ifccheck.objects(m, "IfcSensor", ("SMOKESENSOR", "HEATSENSOR")) == [sd]
+
+
+def test_undeclared_exits_are_one_warning_not_an_error_per_storey():
+    import ifcopenshell.api.pset as pset
+    import ifcopenshell.util.element as ue
+    m = ifcmodel.office(storeys=3)
+    for d in m.by_type("IfcDoor"):
+        ps = m.by_id(ue.get_psets(d)["Pset_DoorCommon"]["id"])
+        pset.edit_pset(m, pset=ps, properties={"FireExit": None})
+    r = rules(ifccheck.check_rules(m))
+    assert r["IFC-EXIT-DATA"] == 1 and not r["IFC-EXIT-COUNT"] and not r["IFC-EXIT-WIDTH"]
+
+
+def test_voids_and_gross_area_zones_are_not_floor_area():
+    m = ifcmodel.office(storeys=1, space_area=400.0)
+    sp = m.by_type("IfcSpace")
+    sp[0].LongName = "Open to below"
+    f = ifccheck.Facts(m)
+    assert f.floor_area(sp[0]) == 0.0 and f.floor_area(sp[1]) == 400.0 and f.floor_volume(sp[0]) == 0.0
+    sp[0].LongName, sp[0].PredefinedType = "Level 1 GFA", "GFA"
+    assert ifccheck.Facts(m).floor_area(sp[0]) == 0.0
+    assert not ifccheck.not_floor(type("S", (), {"Name": "Avoid store", "LongName": None})())

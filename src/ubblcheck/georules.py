@@ -26,7 +26,7 @@ from shapely.ops import unary_union
 
 from . import geom, travel, ubbl
 from .findings import Finding
-from .ifccheck import PSET, Facts, _prop
+from .ifccheck import _FLOOR_SLABS, PSET, Facts, _prop, exits_declared, objects
 
 ABUT_M = 10.0          # assumption: a face "abuts" access within this distance (not in UBBL)
 ACCESS_WIDTH_M = ubbl.ACCESS_ROAD_MIN_M
@@ -40,11 +40,12 @@ USE_WORDS = [
     ("IV", r"office|pejabat|admin|meeting|mesyuarat|conference|work ?station|clerk"),
     ("V", r"shop|kedai|retail|restaurant|restoran|cafe|kafe|food court|salon|barber|showroom|mart"),
     ("VI", r"factory|kilang|production|pengeluaran|workshop|bengkel|assembly line|process"),
-    ("VII", r"hall|dewan|auditorium|cinema|panggung|theatre|surau|mosque|masjid|church|gereja|temple|"
+    ("VII", r"\bhall\b|dewan|auditorium|cinema|panggung|theatre|surau|mosque|masjid|church|gereja|temple|"
             r"classroom|bilik darjah|lecture|gym|function room|banquet|lounge"),
     ("VIII", r"store|stor|storage|warehouse|gudang|car ?park|parking|letak kereta|garage|archive|loading"),
 ]
-ANCILLARY = re.compile(r"toilet|tandas|wc|lobby|lobi|corridor|koridor|stair|tangga|lift|riser|shaft|"
+ANCILLARY = re.compile(r"toilet|tandas|wc|lobby|lobi|corridor|koridor|hallway|(entry|entrance) hall|foyer|"
+                       r"passage|laluan|stair|tangga|lift|riser|shaft|"
                        r"plant|m&e|electrical|genset|pump|pam|janitor|pantry|ahu|duct|void", re.I)
 
 
@@ -119,6 +120,12 @@ def _travel(f: Facts, plans, heat_dir, cell):
     if lim.travel_m is None:
         return out
     open_plan = (f.use or "").endswith("open_plan")
+    if not exits_declared(f):
+        if any(pl.spaces for pl in plans):
+            out.append(Finding("GEO-NOEXIT", "warning", "No door states whether it is a fire exit "
+                               "(Pset_DoorCommon.FireExit), so no travel distance can be measured",
+                               "UBBL by-law 165, 167", []))
+        return out
     for pl in plans:
         if not pl.spaces:
             continue
@@ -255,7 +262,7 @@ def _access(f: Facts):
                                f"{share:.0%} of the building perimeter ({ring.length:.0f} m) is within {ABUT_M:g} m of "
                                f"a >= {ACCESS_WIDTH_M:g} m access; volume {vol:,.0f} m3 needs {need:.0%}",
                                clause, [e.GlobalId for e, _ in access], detail))
-        hyd = [h for h in f.model.by_type("IfcFireSuppressionTerminal") if (h.PredefinedType or "") == "FIREHYDRANT"]
+        hyd = objects(f.model, "IfcFireSuppressionTerminal", ("FIREHYDRANT",))
         if not hyd:
             out.append(Finding("GEO-HYDRANT", "error", "No fire hydrant in the model",
                                "UBBL by-law 225(2)", []))
@@ -323,13 +330,21 @@ def _basement(f: Facts):
         if area <= 100:
             continue
         above = min((s for s in f.storeys if f.elev(s) > f.elev(b)), key=f.elev, default=ground)
-        slabs = [s for s in f.model.by_type("IfcSlab") if f.storey_of(s) == above]
-        bad = [s for s in slabs if _prop(s, "Pset_SlabCommon", "Compartmentation") is not True]
-        if bad or not slabs:
-            out.append(Finding("GEO-BASEMENT", "error",
-                               f"Basement {b.Name} is {area:.0f} m2 (> 100 m2); the floor over it "
-                               f"({above.Name if above else '?'}) must be a compartment floor",
-                               "UBBL by-law 138(d)", [s.GlobalId for s in bad]))
+        where = f"Basement {b.Name} is {area:.0f} m2 (> 100 m2); the floor over it ({above.Name if above else '?'})"
+        slabs = [s for s in f.model.by_type("IfcSlab")
+                 if f.storey_of(s) == above and (s.PredefinedType or "") in _FLOOR_SLABS]
+        declared = {s: _prop(s, "Pset_SlabCommon", "Compartmentation") for s in slabs}
+        no = [s.GlobalId for s, v in declared.items() if v is False]
+        unknown = [s.GlobalId for s, v in declared.items() if v is None]
+        if no:
+            out.append(Finding("GEO-BASEMENT", "error", f"{where} must be a compartment floor, but is declared "
+                               "not to be (Pset_SlabCommon.Compartmentation)", "UBBL by-law 138(d)", no))
+        if unknown:
+            out.append(Finding("GEO-BASEMENT", "warning", f"{where} must be a compartment floor; declare it with "
+                               "Pset_SlabCommon.Compartmentation", "UBBL by-law 138(d)", unknown))
+        if not slabs:
+            out.append(Finding("GEO-BASEMENT", "warning", f"{where} must be a compartment floor, but no floor "
+                               "slab is placed on that storey", "UBBL by-law 138(d)", []))
     return out
 
 
