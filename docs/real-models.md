@@ -33,6 +33,7 @@ The models are not kept in the repository.
 | Room names "Hallway" and "entry hall" matched the Group VII word *hall*. | The houses were reported as containing a place of assembly. | Hallways, entrance halls, foyers and passages count as circulation. *Hall* matches only as a whole word. |
 | A Revit space named "OPEN TO BELOW" sits on the dental clinic's roof storey. | The void counted as floor area, and its storey counted as a storey of the building. | Voids, double-height volumes and `GFA` area zones count as zero floor area. |
 | "Building purpose group is None" | Read like a crash. | Says the group is not declared, and which property to set. |
+| With its four external doors flagged as fire exits, the duplex's upper storey still had "0 exit doors": it is left by the stair inside each unit. | Two exit errors on the upper storey, and two more on a Revit space named "Roof". | A storey with no exit door counts the escape stairs coming up from the storey below. Spaces named only "Roof" or "Attic" count as zero floor area. With its stairs flagged as well, the duplex has no exit findings. |
 
 ## What is left, as published
 

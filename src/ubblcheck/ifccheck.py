@@ -97,7 +97,8 @@ def objects(model, cls: str, types) -> list:
     return [e for t in typed if (t.PredefinedType or "") in types for e in uel.get_types(t)]
 
 
-_VOID = re.compile(r"open to below|\bvoid\b|terbuka ke bawah|double (height|volume)|upper part of", re.I)
+_VOID = re.compile(r"open to below|\bvoid\b|terbuka ke bawah|double (height|volume)|upper part of"
+                   r"|^\s*(roof|attic)( space)?\s*$|\b(roof|ceiling) space\b", re.I)
 
 
 def not_floor(space) -> bool:
@@ -505,7 +506,6 @@ def _exits(f: Facts):
                         "(Pset_DoorCommon.FireExit); exit count and width were not checked",
                         "UBBL by-law 175-177", [])]
     load = defaultdict(int)
-    doors = defaultdict(list)
     for sp in f.model.by_type("IfcSpace"):
         st = f.storey_of(sp)
         if st is None:
@@ -516,18 +516,25 @@ def _exits(f: Facts):
             load[st.Name] += ubbl.occupant_load(a, f.group, use)
         except KeyError:
             continue
-    for d in f.model.by_type("IfcDoor"):
-        if _prop(d, "Pset_DoorCommon", "FireExit") is True:
-            st = f.storey_of(d)
-            if st is not None:
-                doors[st.Name].append(d)
+    exits = _storey_exits(f)
+    top = max((f.elev(s) for s in f.occupied), default=0.0)
+    single_ok = ubbl.single_stair_allowed(f.group, f.use, top)
     for storey, persons in sorted(load.items()):
-        ds = doors.get(storey, [])
+        ds, via_stairs = exits.get(storey, ([], False))
         gids = [d.GlobalId for d in ds]
-        if persons > 0 and len(ds) < ubbl.MIN_EXITS:
+        noun = "escape stair" if via_stairs else "exit door"
+        if persons > 0 and len(ds) == 1 and single_ok:
+            out.append(Finding("IFC-EXIT-SINGLE", "warning",
+                               f"{storey}: one exit ({noun}). By-law 194 allows a single staircase here (topmost "
+                               f"floor {top:.1f} m, at most {ubbl.SINGLE_STAIR_TOP_M} m) provided that: "
+                               + "; ".join(ubbl.SINGLE_STAIR_CONDITIONS),
+                               "UBBL by-law 194", gids, {"top_floor_m": top}))
+        elif persons > 0 and len(ds) < ubbl.MIN_EXITS:
             out.append(Finding("IFC-EXIT-COUNT", "error",
-                               f"{storey}: {len(ds)} exit door(s) for {persons} persons; minimum is {ubbl.MIN_EXITS}",
+                               f"{storey}: {len(ds)} {noun}(s) for {persons} persons; minimum is {ubbl.MIN_EXITS}",
                                "UBBL by-law 177(d)", gids))
+        if via_stairs:
+            continue                # stair widths are not in the model in a form the checker can read
         need = ubbl.exit_units(persons, f.group, "door", f.use) if persons else 0
         have = sum(ubbl.width_units((d.OverallWidth or 0) * f.scale * 1000) for d in ds)
         if have < need:
@@ -535,6 +542,29 @@ def _exits(f: Facts):
                                f"{storey}: occupant load {persons} needs {need} units of 550 mm exit width; "
                                f"exit doors give {have}", "UBBL by-law 175-176, Seventh Schedule", gids,
                                {"persons": persons, "units_needed": need, "units_given": have}))
+    return out
+
+
+def _storey_exits(f: Facts) -> dict[str, tuple[list, bool]]:
+    """Each storey's exits, as (elements, by stair).  The exits are the doors flagged
+    Pset_DoorCommon.FireExit.  A storey with none escapes by its escape stairs
+    (Pset_StairCommon.FireExit) if it has any (by-law 167): a stair is contained in the storey it
+    starts from and serves the next storey up.  A stair up from a basement is not a way out of the
+    storey above it.  Counting stairs only where there is no exit door
+    keeps a door into a stair enclosure and the stair itself from being counted twice."""
+    doors, stairs = defaultdict(list), defaultdict(list)
+    for d in f.model.by_type("IfcDoor"):
+        st = f.storey_of(d)
+        if st is not None and _prop(d, "Pset_DoorCommon", "FireExit") is True:
+            doors[st.Name].append(d)
+    above = dict(zip(f.storeys, f.storeys[1:]))
+    for s in f.model.by_type("IfcStair"):
+        st = f.storey_of(s)
+        if st in above and not f.is_basement(st) and _prop(s, "Pset_StairCommon", "FireExit") is True:
+            stairs[above[st].Name].append(s)
+    out = {name: (ds, False) for name, ds in doors.items()}
+    for name, ss in stairs.items():
+        out.setdefault(name, (ss, True))
     return out
 
 
