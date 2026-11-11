@@ -38,7 +38,12 @@ SUBMISSION_RULES = {
 }
 SUBMISSIONS = tuple(SUBMISSION_RULES)
 SETS = ("passive", "active")
-NUMBER_FIELDS = {"top_floor_m": "topmost floor height", "volume_m3": "building volume"}
+NUMBER_FIELDS = {"top_floor_m": "topmost floor height", "volume_m3": "building volume"}   # warned when blank
+TENTH_FIELDS = {"storeys": "number of storeys", "floor_area_m2": "largest floor area",
+                "gross_area_m2": "gross floor area", "rooms": "number of rooms"}   # asked for when a line needs them
+_NO_GENERAL_LINE = {"VII"}   # Tenth Schedule uses the Fire Department decides case by case: check every item
+_TENTH_FIELD = {"storeys": "storeys", "height_m": "top_floor_m", "floor_area_m2": "floor_area_m2",
+                "total_area_m2": "gross_area_m2", "volume_m3": "volume_m3", "rooms": "rooms"}
 _YES = {"yes", "y", "true", "1", "ya"}
 _NO = {"no", "n", "false", "0", "tidak", ""}
 
@@ -52,6 +57,11 @@ class Form:
     sprinklered: bool = False
     top_floor_m: float | None = None  # topmost floor above fire appliance access level; None = not given
     volume_m3: float | None = None
+    storeys: float | None = None      # storeys at and above ground (Tenth Schedule)
+    floor_area_m2: float | None = None   # largest floor (Tenth Schedule, per-floor lines)
+    gross_area_m2: float | None = None   # all floors (Tenth Schedule, total-area lines)
+    rooms: float | None = None        # hotels (Tenth Schedule III 1)
+    tenth_use: str | None = None      # Tenth Schedule use when the default for the group does not fit
     submission: str = "passive"       # one of SUBMISSIONS
     passive_approval_ref: str | None = None
     sets: dict = field(default_factory=dict)   # passive/active -> [pdf paths]
@@ -69,6 +79,7 @@ class Form:
         f.state = str(f.state or "").strip()
         f.purpose_group = str(f.purpose_group or "").strip().upper()
         f.sub_use = str(f.sub_use).strip() if f.sub_use not in (None, "") else None
+        f.tenth_use = str(f.tenth_use).strip() if f.tenth_use not in (None, "") else None
         f.submission = str(f.submission or "").strip().lower()
         f.passive_approval_ref = str(f.passive_approval_ref).strip() if f.passive_approval_ref not in (None, "") else None
         if not isinstance(f.sprinklered, bool):
@@ -76,7 +87,7 @@ class Form:
             if raw not in _YES | _NO:
                 f.unreadable["sprinklered"] = f.sprinklered
             f.sprinklered = raw in _YES
-        for name in NUMBER_FIELDS:
+        for name in (*NUMBER_FIELDS, *TENTH_FIELDS):
             raw = getattr(f, name)
             try:
                 setattr(f, name, None if raw in (None, "") else float(raw))
@@ -90,6 +101,29 @@ class Form:
         with open(path, encoding="utf-8") as fh:
             d = yaml.safe_load(fh) or {}
         return cls.from_dict(d, os.path.dirname(os.path.abspath(path)))
+
+    def tenth(self) -> ubbl.TenthLookup | None:
+        """The Tenth Schedule line for this building, or None when the group or use is not valid."""
+        try:
+            use = ubbl.tenth_use(self.purpose_group, self.sub_use, self.tenth_use)
+        except KeyError:
+            return None
+        inputs = {k: getattr(self, field) for k, field in _TENTH_FIELD.items()}
+        for k in ("storeys", "rooms"):
+            if inputs[k] is not None:
+                inputs[k] = int(inputs[k])
+        return ubbl.tenth(use, **inputs)
+
+    def requires(self, code: str) -> bool:
+        """Does the building need system `code` (Tenth Schedule letter or alarm digit)?  True when the
+        line cannot be chosen, so the items for it are checked rather than skipped.  Sprinklers (A)
+        are also required when the form says the building is sprinklered."""
+        if code == "A" and self.sprinklered:
+            return True
+        look = self.tenth()
+        if look is None or not look.decided or look.use in _NO_GENERAL_LINE:
+            return True
+        return look.row.requires(code)
 
     def problems(self) -> list[Finding]:
         """Findings about the form itself: values the checks cannot use, and numbers not given."""
@@ -113,7 +147,7 @@ class Form:
             bad("submission", f"Submission {self.submission!r} is not one of {', '.join(SUBMISSIONS)}; "
                               "submission order and set checks were not run")
         for name, raw in self.unreadable.items():
-            if name not in NUMBER_FIELDS:
+            if name not in NUMBER_FIELDS and name not in TENTH_FIELDS:
                 bad(name, f"{name.replace('_', ' ').capitalize()} {raw!r} is not yes or no; taken as no", "warning")
         for name, what in NUMBER_FIELDS.items():
             if name in self.unreadable:
@@ -122,10 +156,45 @@ class Form:
             elif getattr(self, name) is None:
                 bad(name, f"The {what} is not given; items that depend on it were checked as if it were large",
                     "warning")
+        for name, what in TENTH_FIELDS.items():
+            if name in self.unreadable:
+                bad(name, f"The {what} {self.unreadable[name]!r} is not a number")
+        out += self._tenth_problems()
         unknown = set(self.sets) - set(SETS)
         if unknown:
             bad("sets", f"Drawing set(s) {', '.join(sorted(unknown))} are not passive or active; they were "
                         "read but no checklist applies to them", "warning")
+        return out
+
+
+    def _tenth_problems(self) -> list[Finding]:
+        if self.purpose_group not in ubbl.PURPOSE_GROUPS:
+            return []
+        if self.tenth_use and self.tenth_use not in ubbl.tenth_uses():
+            return [Finding("PDF-FORM", "error", f"Tenth Schedule use {self.tenth_use!r} is not one of "
+                                                f"{', '.join(ubbl.tenth_uses())}", "Project form", [],
+                            {"field": "tenth_use"})]
+        look = self.tenth()
+        if look is None:
+            return []           # bad sub-use: reported above
+        if look.missing:
+            fields = [_TENTH_FIELD[m] for m in look.missing]
+            return [Finding("PDF-FORM", "warning",
+                            f"Tenth Schedule, {look.title}: give {', '.join(fields)} to choose a line; until then "
+                            "every active system item is checked", ubbl.TENTH_CLAUSE, [],
+                            {"field": fields[0], "fields": fields})]
+        if not look.decided:
+            return [Finding("PDF-TENTH", "info", f"Tenth Schedule, {look.title}: no line for this building's size; "
+                                                 "active system items are all checked", ubbl.TENTH_CLAUSE, [])]
+        row = look.row
+        out = [Finding("PDF-TENTH", "info", f"Tenth Schedule {row.ref} ({row.title}): {row.describe()}",
+                       row.clause, [], {"line": row.ref, "use": row.use})]
+        if row.refer:
+            out.append(Finding("PDF-TENTH", "info", f"Tenth Schedule {row.ref}: {row.refer}", row.clause, []))
+        if row.requires("A") and not self.sprinklered:
+            out.append(Finding("PDF-TENTH-A", "error",
+                               f"Tenth Schedule {row.ref} requires automatic sprinklers, but the form says the "
+                               "building is not sprinklered; sprinklered limits were not used", row.clause, []))
         return out
 
 
@@ -148,6 +217,10 @@ def _applies(item: dict, form: Form) -> bool:
         return False
     if "min_volume_m3" in w and not _over(form.volume_m3, w["min_volume_m3"]):
         return False
+    if "system" in w:
+        codes = w["system"] if isinstance(w["system"], list) else [w["system"]]
+        if not any(form.requires(str(c)) for c in codes):
+            return False
     return True
 
 

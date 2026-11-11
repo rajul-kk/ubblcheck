@@ -75,7 +75,8 @@ def active_set(path, levels=("GROUND", "FIRST"), yellow=False, extra_tags=None, 
 def form(tmp, passive=None, active=None, **kw):
     import yaml
     d = {"project": "Test office", "state": "Johor", "purpose_group": "IV", "sprinklered": False,
-         "top_floor_m": 8.0, "volume_m3": 12000, "submission": "passive", "sets": {}}
+         "top_floor_m": 8.0, "volume_m3": 12000, "storeys": 2, "floor_area_m2": 800,
+         "gross_area_m2": 1600, "submission": "passive", "sets": {}}
     d.update(kw)
     if passive:
         d["sets"]["passive"] = [passive]

@@ -34,6 +34,23 @@
     <label>Building volume (m³)
       <input name="volume_m3" inputmode="decimal" value="{{ form.volume_m3 or '' }}" placeholder="18000">
       <small>By-law 140</small></label>
+    <label>Storeys
+      <input name="storeys" inputmode="numeric" value="{{ form.storeys or '' }}" placeholder="4">
+      <small>At and above ground (Tenth Schedule)</small></label>
+    <label>Largest floor area (m²)
+      <input name="floor_area_m2" inputmode="decimal" value="{{ form.floor_area_m2 or '' }}" placeholder="900">
+      <small>Tenth Schedule lines set per floor</small></label>
+    <label>Gross floor area (m²)
+      <input name="gross_area_m2" inputmode="decimal" value="{{ form.gross_area_m2 or '' }}" placeholder="3600">
+      <small>All floors (Tenth Schedule)</small></label>
+    <label>Rooms
+      <input name="rooms" inputmode="numeric" value="{{ form.rooms or '' }}">
+      <small>Hotels only (Tenth Schedule III)</small></label>
+    <label>Tenth Schedule use
+      <select name="tenth_use">
+        <option value="">(from the group and sub-use)</option>
+        {% for u in tenth_uses %}<option value="{{ u }}" {% if form.tenth_use == u %}selected{% endif %}>{{ u.replace('_', ' ') }}</option>{% endfor %}
+      </select><small>Only when the default row does not fit, e.g. a library</small></label>
     <label>Submission
       <select name="submission">
         {% for s in submissions %}<option value="{{ s }}" {% if (form.submission or 'passive') == s %}selected{% endif %}>{{ s }}</option>{% endfor %}

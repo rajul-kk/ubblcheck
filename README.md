@@ -125,8 +125,12 @@ the property mapping are in [`docs/ifc-my.md`](docs/ifc-my.md).
   in `checklist.yaml`; every item lists its own.
 - **Colour is detected from vector stroke and fill.** Hatches drawn as
   images are not seen.
-- **The Tenth Schedule is not yet a table.** Which active systems a building
-  class needs is partly encoded as conditions (height, sprinklers).
+- **The Tenth Schedule checks systems, not their layout.** The line for a
+  building (from its group, sub-use, storeys, height, floor areas, volume and,
+  for hotels, rooms) decides which sprinkler, hose reel, hydrant, detector and
+  manual alarm items are asked for. Emergency lighting and alarm types 3-4
+  are reported but not looked for. Where the line needs a size that was not
+  given, every item is checked rather than guessed away.
 - **How the Ninth Schedule finds an element's compartment.** The line is picked from
   the size of the compartment each element is in. That compartment is the element's
   own `MY_FireSafety.CompartmentId` (comma-separated for a wall between

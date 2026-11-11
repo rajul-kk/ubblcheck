@@ -39,14 +39,57 @@ def test_levels(title, level):
     assert pdfread.level_of(title) == level
 
 
+def tenth_line(fs):
+    """Split off the info finding that names the Tenth Schedule line; return (line, the rest)."""
+    lines = [f for f in fs if f.rule == "PDF-TENTH"]
+    assert len(lines) == 1 and lines[0].severity == "info"
+    return lines[0].detail["line"], [f for f in fs if f.rule != "PDF-TENTH"]
+
+
 def test_clean_sets(tmp_path):
     fs, _ = run(tmp_path)
-    assert fs == []
+    assert tenth_line(fs) == ("IV 2", [])
 
 
 def test_passive_only_clean(tmp_path):
     fs, _ = run(tmp_path, with_active=False)
-    assert fs == []
+    assert tenth_line(fs) == ("IV 2", [])
+
+
+def test_tenth_line_decides_active_items(tmp_path):
+    # IV 2 needs hose reels and manual alarms but not detectors: their absence is not a finding
+    fs, _ = run(tmp_path, active_kw={"drop": ["SMOKE DETECTOR"]})
+    assert "PDF-A03" not in rules(fs)
+    # a large office (IV 3) does need detectors
+    fs, _ = run(tmp_path, active_kw={"drop": ["SMOKE DETECTOR"]}, top_floor_m=22.0, gross_area_m2=6000,
+                storeys=6)
+    assert tenth_line(fs)[0] == "IV 3" and rules(fs)["PDF-A03"] == 1
+
+
+def test_tenth_missing_size_checks_everything(tmp_path):
+    fs, _ = run(tmp_path, active_kw={"drop": ["SMOKE DETECTOR"]}, gross_area_m2=None)
+    form = [f for f in fs if f.rule == "PDF-FORM"]
+    assert len(form) == 1 and form[0].detail["fields"] == ["gross_area_m2"]
+    assert rules(fs)["PDF-A03"] == 1            # undecided: checked, not skipped
+
+
+def test_tenth_sprinklers_required_but_not_declared(tmp_path):
+    fs, _ = run(tmp_path, top_floor_m=40.0, gross_area_m2=9000, storeys=10)
+    r = rules(fs)
+    assert r["PDF-TENTH-A"] == 1 and r["PDF-A04"] == 1   # and the sprinkler layout is asked for
+
+
+def test_assembly_has_no_line_so_everything_is_checked(tmp_path):
+    fs, _ = run(tmp_path, active_kw={"drop": ["SMOKE DETECTOR"]}, purpose_group="VII")
+    assert rules(fs)["PDF-A03"] == 1
+
+
+def test_tenth_bad_inputs(tmp_path):
+    fs, _ = run(tmp_path, tenth_use="II.nowhere", storeys="two")
+    fields = {f.detail["field"] for f in fs if f.rule == "PDF-FORM"}
+    assert fields == {"tenth_use", "storeys"}
+    fs, _ = run(tmp_path, tenth_use="II.library", storeys=1, gross_area_m2=1200)
+    assert tenth_line(fs)[0] == "II 1(iv)(c)"
 
 
 def test_missing_items_are_named_with_sheets(tmp_path):

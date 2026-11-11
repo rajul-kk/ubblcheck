@@ -31,7 +31,9 @@ def _rid(resp):
 
 def _pdf_form(tmp_path, **kw):
     d = {"project": "Lot 5 office", "state": "Selangor", "purpose_group": "IV", "sub_use": "",
-         "top_floor_m": "8", "volume_m3": "12000", "submission": "passive", "passive_approval_ref": ""}
+         "top_floor_m": "8", "volume_m3": "12000", "storeys": "2", "floor_area_m2": "800",
+         "gross_area_m2": "1600", "rooms": "", "tenth_use": "", "submission": "passive",
+         "passive_approval_ref": ""}
     d.update(kw)
     return d
 
@@ -40,6 +42,7 @@ def test_start_page_lists_both_checks(client):
     html = client.get("/").get_data(as_text=True)
     assert 'action="/pdf"' in html and 'action="/ifc"' in html
     assert "Place of assembly" in html and "hospital" in html
+    assert "II.library" in html and 'name="gross_area_m2"' in html
 
 
 def test_drawing_set_end_to_end(client, tmp_path):
@@ -48,6 +51,7 @@ def test_drawing_set_end_to_end(client, tmp_path):
     rid = _rid(client.post("/pdf", data=data, content_type="multipart/form-data"))
     html = client.get(f"/runs/{rid}").get_data(as_text=True)
     assert "Lot 5 office" in html and "PDF-RAMP" in html and "PDF-P12" in html and "by-law 253" in html
+    assert "Tenth Schedule IV 2" in html
     info = json.loads((tmp_path / "work" / rid / "run.json").read_text(encoding="utf-8"))
     assert info["kind"] == "pdf" and info["uploads"] == ["passive.pdf"] and info["summary"]["error"] >= 2
     rep = client.get(f"/runs/{rid}/files/{info['files']['report']}")

@@ -19,6 +19,11 @@ sub_use:                      # Seventh Schedule row if the group has several: h
 sprinklered: false            # automatic sprinkler installation
 top_floor_m: 14.0             # topmost floor above fire appliance access level (by-law 229)
 volume_m3: 18000              # building volume (by-law 140)
+storeys: 4                    # storeys at and above ground (Tenth Schedule)
+floor_area_m2: 900            # largest floor (Tenth Schedule)
+gross_area_m2: 3600           # all floors (Tenth Schedule)
+rooms:                        # hotels only (Tenth Schedule III)
+tenth_use:                    # Tenth Schedule row if the default does not fit: II.library, VIII.storage ...
 submission: passive           # passive | active | both
 passive_approval_ref:         # Bomba passive approval reference, needed for an active submission
 sets:

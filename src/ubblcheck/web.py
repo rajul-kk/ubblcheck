@@ -65,7 +65,8 @@ def create_app(work_dir: str | None = None, trusted_hosts: list[str] | None = LO
 
     def page(error=None, form=None, status=200):
         return render_template("index.html", error=error, form=form or {}, groups=ubbl.PURPOSE_GROUPS,
-                               sub_uses=_sub_uses(), submissions=pdfcheck.SUBMISSIONS,
+                               sub_uses=_sub_uses(), tenth_uses=ubbl.tenth_uses(),
+                               submissions=pdfcheck.SUBMISSIONS,
                                recent=_recent(app.config["WORK_DIR"])), status
 
     @app.get("/")
@@ -114,7 +115,8 @@ def create_app(work_dir: str | None = None, trusted_hosts: list[str] | None = LO
     @app.post("/pdf")
     def check_pdf():
         fields = {k: request.form.get(k, "") for k in ("project", "state", "purpose_group", "sub_use",
-                                                       "top_floor_m", "volume_m3", "submission",
+                                                       "top_floor_m", "volume_m3", "storeys", "floor_area_m2",
+                                                       "gross_area_m2", "rooms", "tenth_use", "submission",
                                                        "passive_approval_ref")}
         fields["sprinklered"] = request.form.get("sprinklered") == "on"
 

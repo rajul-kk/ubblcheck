@@ -11,6 +11,9 @@
 #   match:  regexes, case-insensitive, any one is enough (English and Malay)
 #   when:   only check if the project form says so
 #           sprinklered: true | min_top_floor_m: <m> | min_volume_m3: <m3>
+#           system: <code> or [<codes>]: the Tenth Schedule line requires one of them
+#             (A sprinklers, G hose reels, H hydrants, 1 detectors, 2 manual alarm; A also
+#             when the form says sprinklered; all apply when no line can be chosen)
 #   severity: error (rejection risk) | warning | info (where applicable)
 
 items:
@@ -136,6 +139,7 @@ items:
     what: Hose reels, break glass and alarm bells
     match: ['hose reel', 'kekili hos', '\bHR\d*\b']
     also: ['break ?glass', 'pecah kaca', '\bBG\d*\b', 'manual call point', 'alarm bell', 'loceng', '\bAB\d*\b']
+    when: {system: [G, "2"]}
     basis: IPM passive floor 15; UBBL by-law 225(1), 237, Tenth Schedule
     severity: error
   - id: P16
@@ -227,6 +231,7 @@ items:
     scope: any
     what: Heat / smoke detector wiring with exact locations
     match: ['smoke detector', 'heat detector', 'pengesan (asap|haba)', '\bSD\d*\b', '\bHD\d*\b']
+    when: {system: "1"}
     basis: IPM active floor 3; UBBL by-law 225(1), Tenth Schedule
     severity: warning
   - id: A04
@@ -235,7 +240,7 @@ items:
     scope: each
     what: Sprinkler heads and branch pipes with exact locations
     match: ['sprinkler', 'pemercik']
-    when: {sprinklered: true}
+    when: {system: A}
     basis: IPM active floor 4; UBBL by-law 225(1), 228
     severity: error
 
@@ -282,7 +287,8 @@ items:
     scope: any
     what: Main fire alarm control panel schematic
     match: ['fire alarm (control )?panel', '\bM?FACP\b', 'panel kawalan penggera', 'main alarm panel']
-    basis: IPM active other 3; UBBL by-law 237
+    when: {system: ["1", "2"]}
+    basis: IPM active other 3; UBBL by-law 237, Tenth Schedule
     severity: error
 
 # Tags compared between the passive and active sets, sheet by sheet.
