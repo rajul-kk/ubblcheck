@@ -223,6 +223,23 @@ DIRECT_DISTANCE_FRACTION = 2 / 3    # by-law 165(1)
 ROOM_TRAVEL_M = 15                  # by-law 165(3)
 FIRE_DOOR_FRP_MIN = (30, 60, 120, 240)  # minutes, by-law 162-163 and Ninth Schedule
 MIN_EXITS = 2                        # by-law 177(d)
+SINGLE_STAIR_TOP_M = 12              # by-law 194: topmost floor at most this high
+SINGLE_STAIR_CONDITIONS = (
+    "every element of structure has at least 1 hour FRP (a)",
+    "the stair from ground to first floor is separated from the rest of the ground floor by a "
+    "2-hour wall (i)",
+    "travel distance is at most 12 m from the room door to the exit, and 12 m within the room "
+    "(iii); up to 30 m on ground and first storeys with escape windows (iv)",
+    "no use other than domestic or office, except a shop or car park on the ground storey (b)",
+)
+
+
+def single_stair_allowed(group: str | None, use: str | None, top_floor_m: float) -> bool:
+    """By-law 194: may this building have a single staircase?  Domestic (group I, or group III
+    flats) or office (group IV) use, with the topmost floor at most 12 m up.  The other conditions
+    are listed in SINGLE_STAIR_CONDITIONS for the submitting person to confirm."""
+    domestic_or_office = group in ("I", "IV") or (group == "III" and use in (None, "flat"))
+    return domestic_or_office and top_floor_m <= SINGLE_STAIR_TOP_M + 1e-9
 
 
 # ---------------------------------------------------------------- Ninth Schedule

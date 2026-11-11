@@ -44,7 +44,7 @@ here as covered, and every by-law listed as covered must be cited by the code.
 | 164 | Door closers | — | shown | Drawings P04. Possible in IFC: Pset_DoorCommon.SelfClosing |
 | 165 | Travel distance | checked | checked | Declared (IFC-TRAVEL) and computed on plan (GEO-TRAVEL, GEO-DIRECT, GEO-ROOM); drawings PDF-TRAVEL, PDF-DEADEND |
 | 166 | Exits accessible at all times | — | — | Operation |
-| 167 | Storey exits | checked | shown | GEO-NOEXIT; exit flag on doors (MY-P10); drawings P03 |
+| 167 | Storey exits | checked | shown | Exit doors (MY-P10); an upper storey with none escapes by an escape stair from the storey below. GEO-NOEXIT; drawings P03 |
 | 168 | Staircases | data | shown | Escape stair flag (MY-P13); stair widths not judged |
 | 169–171 | Exit routes, unenclosed openings, horizontal exits | data | — | Data asked for; routes not judged |
 | 172 | Exit signs | data | shown | Drawings P13 |
@@ -56,7 +56,7 @@ here as covered, and every by-law listed as covered must be cited by the code.
 | 178–188 | Places of assembly: exits, seating, gangways, travel | — | — | Not yet: needs seating layout and the assembly class of by-law 179 |
 | 189–191 | Enclosure of escape routes, external stairs, adjacent openings | — | — | Construction detail |
 | 192–193 | Moving walks, power-operated doors | — | — | Rare; not modelled |
-| 194 | Building with single staircase | — | — | Not yet: IFC-EXIT-COUNT asks for two exits even where 194 would allow one |
+| 194 | Building with single staircase | checked | — | One exit is a warning, not an error, for domestic and office buildings with the topmost floor at most 12 m (IFC-EXIT-SINGLE); the warning lists conditions (a), (b), (i), (iii) and (iv) to confirm |
 | 195 | Staircases to roof level over 30 m | — | — | Possible: stair reaching the top storey |
 | 196–202 | Smoke and protected lobbies, staircase ventilation, pressurisation | — | shown | Locations marked (P08) |
 | 203–212 | Spread of flame, roofs | — | — | Needs surface classes; possible via Pset_*Common.SurfaceSpreadOfFlame |

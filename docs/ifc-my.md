@@ -65,7 +65,8 @@ passive and active sets.
 |---|---|---|
 | IFC-COMP-AREA / -VOL | Storey area and volume of each compartment against the Fifth Schedule, doubled when sprinklered | by-law 136 |
 | IFC-TRAVEL, IFC-DEADEND | Declared distances against the Seventh Schedule | by-law 165(4) |
-| IFC-EXIT-COUNT | At least two exit doors on every occupied storey | by-law 177(d) |
+| IFC-EXIT-COUNT | At least two exits on every occupied storey: exit doors, or, on a storey with none, escape stairs coming up from the storey below | by-law 167, 177(d) |
+| IFC-EXIT-SINGLE | One exit, in a domestic or office building whose topmost floor is at most 12 m: a warning listing the by-law 194 conditions, not an error | by-law 194 |
 | IFC-EXIT-WIDTH | Occupant load against units of 550 mm exit width | by-law 175–176 |
 | IFC-COMP-FLOOR | In buildings over 30 m, floors more than 9 m up are compartment floors | by-law 137 |
 | IFC-FIREDOOR | A door in a compartment wall has an FRP of at least 30 min, and is warned if weaker than the wall | by-law 162 |
@@ -84,6 +85,11 @@ passive and active sets.
   building's Tenth Schedule line and warn when a required system (hose reels,
   hydrants, detectors, manual alarms) has no object in the model; that is
   normal for an architectural model. Coverage and spacing are not checked.
+- **Exits are counted per storey, not per dwelling.** A duplex block with one
+  stair in each unit has two stairs on the upper storey, so it passes the
+  two-exit rule though each unit has one. By-law 194 then applies unit by
+  unit, which the checker cannot see. Stair widths are not checked: the
+  model has no width property the checker can rely on.
 - **Ninth Schedule: listed elements only.** Element FRP is checked against the
   Ninth Schedule for walls, floors, columns and beams. Notional periods of
   materials (Part 2) are not encoded.

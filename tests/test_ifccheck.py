@@ -264,3 +264,49 @@ def test_single_storey_frame_is_exempt_but_compartment_walls_are_not():
     fs = ifccheck.check_rules(two)
     assert [f for f in fs if f.rule == "IFC-FRP" and "column" in f.message]
     assert not [f for f in fs if f.rule == "IFC-FRP-SINGLE"]
+
+
+@pytest.mark.parametrize("storeys, storey_h, group, single", [
+    (3, 6.0, "IV", True),       # topmost floor 12 m: allowed
+    (3, 6.5, "IV", False),      # 13 m: two exits needed
+    (2, 4.0, "III", True),      # flats
+    (2, 4.0, "V", False),       # a shop building is not domestic or office
+])
+def test_single_staircase(write, storeys, storey_h, group, single):
+    m = ifcmodel.office(storeys=storeys, storey_h=storey_h, group=group, exits_per_storey=1, space_area=50)
+    fs = ifccheck.check(write(m))
+    r = rules(fs)
+    if single:
+        assert r["IFC-EXIT-SINGLE"] == storeys and not r["IFC-EXIT-COUNT"]
+        msg = next(f for f in fs if f.rule == "IFC-EXIT-SINGLE")
+        assert msg.severity == "warning" and "194" in msg.clause and "2-hour wall" in msg.message
+    else:
+        assert r["IFC-EXIT-COUNT"] == storeys and not r["IFC-EXIT-SINGLE"]
+
+
+def test_upper_storey_escapes_by_stair(write):
+    import ifcopenshell.api.pset as pset
+    import ifcopenshell.util.element as ue
+    m = ifcmodel.office(storeys=3, exits_per_storey=1, space_area=50)
+    f = ifccheck.Facts(m)
+    for d in m.by_type("IfcDoor"):
+        if f.storey_of(d).Name != "L0":      # upper storeys: the door is not an exit, the stair is
+            pset.edit_pset(m, pset=m.by_id(ue.get_psets(d)["Pset_DoorCommon"]["id"]), properties={"FireExit": False})
+    fs = ifccheck.check(write(m))
+    single = {f.message.split(":")[0]: f for f in fs if f.rule == "IFC-EXIT-SINGLE"}
+    assert set(single) == {"L0", "L1", "L2"}
+    assert "escape stair" in single["L1"].message and "exit door" in single["L0"].message
+    assert single["L1"].where == [s.GlobalId for s in m.by_type("IfcStair") if s.Name == "ST0"]
+    assert not rules(fs)["IFC-EXIT-WIDTH"]     # stair widths are not judged
+    # too tall for by-law 194: the stair still counts, as one exit of the two needed
+    m = ifcmodel.office(storeys=4, storey_h=5.0, exits_per_storey=1, space_area=50)
+    fs = ifccheck.check(write(m))
+    assert rules(fs)["IFC-EXIT-COUNT"] == 4
+
+
+def test_roof_space_is_not_floor():
+    import ifcopenshell
+    m = ifcopenshell.file(schema="IFC4")
+    for name, expect in [("Roof", True), ("Attic space", True), ("Roof garden", False), ("Roof terrace", False)]:
+        sp = m.createIfcSpace(Name=name)
+        assert ifccheck.not_floor(sp) is expect, name
