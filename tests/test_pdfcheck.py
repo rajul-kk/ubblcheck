@@ -32,7 +32,9 @@ def test_sheet_reading(tmp_path):
 @pytest.mark.parametrize("title,level", [
     ("GROUND FLOOR PLAN", "L0"), ("LEVEL 12 PLAN", "L12"), ("3RD FLOOR PLAN", "L3"),
     ("BASEMENT 2 PLAN", "B2"), ("PELAN TINGKAT 4", "L4"), ("PELAN LANTAI BAWAH", "L0"),
-    ("ROOF PLAN", "ROOF"), ("LOWER GROUND FLOOR PLAN", "LG")])
+    ("ROOF PLAN", "ROOF"), ("LOWER GROUND FLOOR PLAN", "LG"),
+    ("BASEMENT LEVEL 2 PLAN", "B2"), ("BASEMENT LEVEL 1 PLAN", "B1"), ("BASEMENT PLAN", "B1"),
+    ("PELAN ARAS BAWAH TANAH 2", "B2")])
 def test_levels(title, level):
     assert pdfread.level_of(title) == level
 
@@ -115,3 +117,25 @@ def test_missing_colour_is_warned(tmp_path):
     form = pdfcheck.Form.load(drawings.form(tmp_path, p, None))
     fs, _ = pdfcheck.check(form)
     assert any(f.rule == "PDF-PS4-COLOUR" for f in fs)
+
+
+def test_unknown_sub_use_is_reported_not_skipped(tmp_path):
+    fs, _ = run(tmp_path, passive_kw={"td": "90"}, with_active=False, sub_use="hospital")   # group IV
+    r = rules(fs)
+    assert r["PDF-FORM"] == 1 and r["PDF-TRAVEL"] == 0
+    assert "hospital" in next(f for f in fs if f.rule == "PDF-FORM").message
+
+
+def test_blank_numbers_in_the_form_do_not_crash(tmp_path):
+    fs, _ = run(tmp_path, with_active=False, top_floor_m=None, volume_m3=None)
+    forms = [f for f in fs if f.rule == "PDF-FORM"]
+    assert {f.detail["field"] for f in forms} == {"top_floor_m", "volume_m3"}
+    assert all(f.severity == "warning" for f in forms)
+    # unknown height: the items for tall buildings are checked rather than skipped
+    assert rules(fs)["PDF-P16"] == 1
+
+
+def test_bad_form_values_are_errors(tmp_path):
+    fs, _ = run(tmp_path, with_active=False, purpose_group="IX", submission="later")
+    bad = {f.detail["field"] for f in fs if f.rule == "PDF-FORM" and f.severity == "error"}
+    assert bad == {"purpose_group", "submission"}

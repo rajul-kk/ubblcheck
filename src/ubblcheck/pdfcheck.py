@@ -23,6 +23,13 @@ DATA = os.path.join(os.path.dirname(__file__), "data", "checklist.yaml")
 COLOUR_MIN = 40.0     # points of coloured linework before a colour counts as drawn
 
 
+SUBMISSIONS = ("passive", "active", "both")
+SETS = ("passive", "active")
+NUMBER_FIELDS = {"top_floor_m": "topmost floor height", "volume_m3": "building volume"}
+_YES = {"yes", "y", "true", "1", "ya"}
+_NO = {"no", "n", "false", "0", "tidak", ""}
+
+
 @dataclass
 class Form:
     project: str = ""
@@ -30,21 +37,83 @@ class Form:
     purpose_group: str = "IV"
     sub_use: str | None = None
     sprinklered: bool = False
-    top_floor_m: float = 0.0          # topmost floor above fire appliance access level
-    volume_m3: float = 0.0
-    submission: str = "passive"       # passive | active | both
+    top_floor_m: float | None = None  # topmost floor above fire appliance access level; None = not given
+    volume_m3: float | None = None
+    submission: str = "passive"       # one of SUBMISSIONS
     passive_approval_ref: str | None = None
     sets: dict = field(default_factory=dict)   # passive/active -> [pdf paths]
+    unreadable: dict = field(default_factory=dict)   # field -> raw value that could not be read
+
+    @classmethod
+    def from_dict(cls, d: dict, base: str = ".") -> "Form":
+        """A form from parsed YAML or a web form.  Set paths are relative to `base`.
+        Values are normalised; what cannot be read is kept in `unreadable` and reported by problems()."""
+        d = dict(d or {})
+        sets = {k: [v if os.path.isabs(v) else os.path.join(base, v) for v in (vs or [])]
+                for k, vs in (d.pop("sets", {}) or {}).items()}
+        f = cls(sets=sets, **{k: v for k, v in d.items() if k in cls.__dataclass_fields__ and k != "unreadable"})
+        f.project = str(f.project or "")
+        f.state = str(f.state or "").strip()
+        f.purpose_group = str(f.purpose_group or "").strip().upper()
+        f.sub_use = str(f.sub_use).strip() if f.sub_use not in (None, "") else None
+        f.submission = str(f.submission or "").strip().lower()
+        f.passive_approval_ref = str(f.passive_approval_ref).strip() if f.passive_approval_ref not in (None, "") else None
+        if not isinstance(f.sprinklered, bool):
+            raw = str(f.sprinklered).strip().lower()
+            if raw not in _YES | _NO:
+                f.unreadable["sprinklered"] = f.sprinklered
+            f.sprinklered = raw in _YES
+        for name in NUMBER_FIELDS:
+            raw = getattr(f, name)
+            try:
+                setattr(f, name, None if raw in (None, "") else float(raw))
+            except (TypeError, ValueError):
+                f.unreadable[name] = raw
+                setattr(f, name, None)
+        return f
 
     @classmethod
     def load(cls, path: str) -> "Form":
         with open(path, encoding="utf-8") as fh:
             d = yaml.safe_load(fh) or {}
-        base = os.path.dirname(os.path.abspath(path))
-        sets = {k: [v if os.path.isabs(v) else os.path.join(base, v) for v in (vs or [])]
-                for k, vs in (d.pop("sets", {}) or {}).items()}
-        known = {k: v for k, v in d.items() if k in cls.__dataclass_fields__}
-        return cls(sets=sets, **known)
+        return cls.from_dict(d, os.path.dirname(os.path.abspath(path)))
+
+    def problems(self) -> list[Finding]:
+        """Findings about the form itself: values the checks cannot use, and numbers not given."""
+        out = []
+
+        def bad(name, msg, severity="error"):
+            out.append(Finding("PDF-FORM", severity, msg, "Project form", [], {"field": name}))
+
+        if self.purpose_group not in ubbl.PURPOSE_GROUPS:
+            bad("purpose_group", f"Purpose group {self.purpose_group!r} is not one of I-VIII; "
+                                 "travel distances were not checked")
+        elif self.sub_use:
+            try:
+                ubbl.use_key(self.purpose_group, self.sub_use)
+            except KeyError:
+                rows = sorted(k.split(".", 1)[1] for k in ubbl.TRAVEL if k.startswith(self.purpose_group + "."))
+                bad("sub_use", f"Sub-use {self.sub_use!r} is not a Seventh Schedule row of group "
+                               f"{self.purpose_group} ({', '.join(rows) or 'the group has one row; leave it blank'}); "
+                               "travel distances were not checked")
+        if self.submission not in SUBMISSIONS:
+            bad("submission", f"Submission {self.submission!r} is not one of {', '.join(SUBMISSIONS)}; "
+                              "submission order and set checks were not run")
+        for name, raw in self.unreadable.items():
+            if name not in NUMBER_FIELDS:
+                bad(name, f"{name.replace('_', ' ').capitalize()} {raw!r} is not yes or no; taken as no", "warning")
+        for name, what in NUMBER_FIELDS.items():
+            if name in self.unreadable:
+                bad(name, f"The {what} {self.unreadable[name]!r} is not a number; items that depend on it "
+                          "were checked as if it were large")
+            elif getattr(self, name) is None:
+                bad(name, f"The {what} is not given; items that depend on it were checked as if it were large",
+                    "warning")
+        unknown = set(self.sets) - set(SETS)
+        if unknown:
+            bad("sets", f"Drawing set(s) {', '.join(sorted(unknown))} are not passive or active; they were "
+                        "read but no checklist applies to them", "warning")
+        return out
 
 
 def load_checklist(path: str = DATA) -> dict:
@@ -52,13 +121,19 @@ def load_checklist(path: str = DATA) -> dict:
         return yaml.safe_load(fh)
 
 
+def _over(value: float | None, threshold: float) -> bool:
+    """value > threshold, where a value not given counts as over: a missing item is
+    better reported than silently skipped."""
+    return value is None or value > threshold
+
+
 def _applies(item: dict, form: Form) -> bool:
     w = item.get("when") or {}
     if w.get("sprinklered") is not None and bool(form.sprinklered) != bool(w["sprinklered"]):
         return False
-    if "min_top_floor_m" in w and not form.top_floor_m > w["min_top_floor_m"]:
+    if "min_top_floor_m" in w and not _over(form.top_floor_m, w["min_top_floor_m"]):
         return False
-    if "min_volume_m3" in w and not form.volume_m3 > w["min_volume_m3"]:
+    if "min_volume_m3" in w and not _over(form.volume_m3, w["min_volume_m3"]):
         return False
     return True
 
@@ -210,12 +285,10 @@ def numbers(sheets: list[pdfread.Sheet], form: Form, checklist: dict) -> list[Fi
                                        f"Ramp gradient 1:{m.group(1)} is steeper than 1:{limit}"
                                        f"{' (' + form.state + ')' if form.state else ''}: '{line.strip()[:80]}'",
                                        rcfg["basis"], [s.ref], {"gradient": n, "limit": limit}))
-    if form.purpose_group not in ubbl.PURPOSE_GROUPS:
-        return out
     try:
         lim = ubbl.travel_limit(form.purpose_group, form.sprinklered, form.sub_use)
     except KeyError:
-        return out
+        return out          # bad group or sub-use: Form.problems() reports it
     for s in sheets:
         if s.set != "passive" or s.kind != "floor_plan":
             continue
@@ -279,7 +352,8 @@ def read_sets(form: Form) -> list[pdfread.Sheet]:
 def check(form: Form, checklist: dict | None = None) -> tuple[list[Finding], list[pdfread.Sheet]]:
     checklist = checklist or load_checklist()
     sheets = read_sets(form)
-    out = procedure(sheets, form)
+    out = form.problems()
+    out += procedure(sheets, form)
     out += completeness(sheets, form, checklist)
     out += consistency(sheets, checklist)
     out += numbers(sheets, form, checklist)

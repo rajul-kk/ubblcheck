@@ -44,7 +44,7 @@ class Sheet:
 
 def level_of(title: str) -> str | None:
     t = title.lower()
-    m = re.search(r"basement\s*(\d*)|lower ground|bawah tanah\s*(\d*)", t)
+    m = re.search(r"basement\s*(?:level|aras)?\s*(\d*)|lower ground|bawah tanah\s*(?:aras)?\s*(\d*)", t)
     if m:
         if "lower ground" in m.group(0):
             return "LG"
