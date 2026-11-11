@@ -127,11 +127,13 @@ the property mapping are in [`docs/ifc-my.md`](docs/ifc-my.md).
   images are not seen.
 - **The Tenth Schedule is not yet a table.** Which active systems a building
   class needs is partly encoded as conditions (height, sprinklers).
-- **Ninth Schedule periods use the largest compartment.** When spaces carry
-  `CompartmentId`, the storey area and volume of the largest compartment pick the
-  line for every element, so an element in a smaller compartment may be held to a
-  longer period than it needs. Part 2 of the Ninth Schedule's specification tables
-  (notional periods of materials) is not encoded.
+- **How the Ninth Schedule finds an element's compartment.** The line is picked from
+  the size of the compartment each element is in. That compartment is the element's
+  own `MY_FireSafety.CompartmentId` (comma-separated for a wall between
+  compartments), else the compartments whose spaces its footprint touches. Failing
+  both, the element is held to the longest period of any compartment on its storey,
+  which may be stricter than it needs. Part 2 of the Ninth Schedule's specification
+  tables (notional periods of materials) is not encoded.
 - **The IFC pack's custom property set is provisional.** `MY_FireSafety`
   should be aligned with the CIDB NBeS IFC guideline, which is not public.
 - **One possible misprint in the source.** In the JKR text, the Shops

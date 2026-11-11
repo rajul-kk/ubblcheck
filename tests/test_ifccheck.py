@@ -140,3 +140,40 @@ def test_spaces_without_area_quantities_are_measured():
         G.box_floor(md, md.storey(f"L{i}", z), 60, 40, z=z, exits=((0, 2.0), (2, 2.0)))
     r = rules(ifccheck.check_rules(md.m))       # 2400 m2 per storey, no Qto: limit 2000 m2
     assert r["IFC-COMP-AREA"] == 2
+
+
+def test_ninth_schedule_line_per_compartment():
+    # group IV, 8 m: a 300 m2 / 1050 m3 compartment is on the 15 m line (60 min);
+    # a 6000 m2 one is on the "over 28 m" line (90 min)
+    m = ifcmodel.office(space_area=300.0)
+    for i in range(2):
+        ifcmodel.set_space_area(m, f"L{i}-S1", 6000.0)
+    small = ifcmodel.add_column(m, rating="60", name="C-small", compartment="C0-0")
+    big = ifcmodel.add_column(m, rating="60", name="C-big", compartment="C0-1")
+    frp = [f for f in ifccheck.check_rules(m) if f.rule == "IFC-FRP"]
+    cols = [f for f in frp if "column" in f.message]
+    assert len(cols) == 1 and cols[0].where == [big.GlobalId] and cols[0].detail["required_min"] == 90
+    assert cols[0].detail["basis"] == "compartment C0-1"
+    assert small.GlobalId not in {g for f in frp for g in f.where}
+    # the storey's walls carry no compartment id: held to the longer of the two periods
+    walls = [f for f in frp if "wall" in f.message]
+    assert walls and all(f.detail["required_min"] == 90 for f in walls)
+
+
+def test_elements_are_placed_in_compartments_by_geometry():
+    import ifcopenshell.api.pset as pset
+    import geomodel as G
+    md = G.Model(group="IV")
+    l0, l1 = md.storey("L0", 0.0), md.storey("L1", 3.5)
+    md.space(l0, G.rect(0, 0, 10, 10), 0.0, "Small", compartment="CS")        # 100 m2: 30 min
+    md.space(l0, G.rect(12, 0, 92, 80), 0.0, "Big", compartment="CB")         # 6400 m2: 90 min
+    md.space(l1, G.rect(12, 0, 92, 80), 3.5, "Big L1", compartment="CB1")
+    walls = {}
+    for name, a, b in (("in-small", (0, 5), (10, 5)), ("in-big", (50, 5), (60, 5))):
+        w = walls[name] = md.wall(l0, a, b, 0.0, name=name)
+        ps = next(r.RelatingPropertyDefinition for r in w.IsDefinedBy
+                  if r.RelatingPropertyDefinition.Name == "Pset_WallCommon")
+        pset.edit_pset(md.m, pset=ps, properties={"LoadBearing": True, "FireRating": "60"})
+    frp = [f for f in ifccheck.check_rules(md.m) if f.rule == "IFC-FRP"]
+    assert len(frp) == 1 and frp[0].where == [walls["in-big"].GlobalId]
+    assert frp[0].detail["required_min"] == 90 and frp[0].detail["basis"] == "compartment CB"

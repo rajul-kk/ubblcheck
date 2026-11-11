@@ -38,6 +38,7 @@ Data with no IFC home goes in the custom set `MY_FireSafety`.
 | Building height | `IfcBuilding` · `MY_FireSafety.BuildingHeight` | by-law 135(a) |
 | Sprinklered | `IfcBuilding` · `Pset_BuildingCommon.SprinklerProtectionAutomatic` | by-law 136 proviso |
 | Compartment | `IfcSpace` · `MY_FireSafety.CompartmentId` | by-law 136 |
+| Compartment of an element of structure (optional) | `IfcColumn`, `IfcBeam`, `IfcSlab`, `IfcWall` · `MY_FireSafety.CompartmentId`, comma-separated for a wall between compartments | Ninth Schedule: picks the line from that compartment's size; without it, from the spaces the element touches |
 | Floor area | `IfcSpace` · `Qto_SpaceBaseQuantities.NetFloorArea` | by-law 175 |
 | Travel distance, dead end | `IfcSpace` · `MY_FireSafety.MaxTravelDistance`, `DeadEndDistance` | by-law 165 |
 | Occupant-load row | `IfcSpace` · `MY_FireSafety.OccupancyUse` | Seventh Schedule |

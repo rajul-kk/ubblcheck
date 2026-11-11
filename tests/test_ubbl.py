@@ -85,3 +85,11 @@ def test_ninth_schedule_single_storey_and_notes():
     low = ubbl.fire_resistance("IV", 6, 200, 900, storeys=2)
     assert ubbl.element_frp(low, "column", True) == 60
     assert ubbl.element_frp(low, "column", True, basement_area_m2=40) == 0       # note (c)
+
+
+def test_ninth_schedule_x_lines_are_for_whole_buildings():
+    # IV, 6 m, 200 m2: the building line (c x) needs no period; a compartment of that size skips it
+    assert ubbl.fire_resistance("IV", 6, 200, 900, storeys=2).above_min == 0
+    assert ubbl.fire_resistance("IV", 6, 200, 900, storeys=2, compartment=True).above_min == 30
+    # group III keeps its x line for compartments
+    assert ubbl.fire_resistance("III", 6, 400, 900, storeys=2, compartment=True).above_min == 30

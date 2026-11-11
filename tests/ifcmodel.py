@@ -116,10 +116,19 @@ def to_millimetres(m):
     return m
 
 
-def add_column(m, storey_index=0, rating=None, name="C1"):
+def add_column(m, storey_index=0, rating=None, name="C1", compartment=None):
     st = sorted(m.by_type("IfcBuildingStorey"), key=lambda s: s.Elevation or 0.0)[storey_index]
     c = root.create_entity(m, ifc_class="IfcColumn", name=name)
     if rating is not None:
         _ps(m, c, "Pset_ColumnCommon", {"FireRating": rating})
+    if compartment is not None:
+        _ps(m, c, "MY_FireSafety", {"CompartmentId": compartment})
     spatial.assign_container(m, products=[c], relating_structure=st)
     return c
+
+
+def set_space_area(m, space_name, area):
+    sp = next(s for s in m.by_type("IfcSpace") if s.Name == space_name)
+    q = next(r.RelatingPropertyDefinition for r in sp.IsDefinedBy
+             if r.RelatingPropertyDefinition.is_a("IfcElementQuantity"))
+    pset.edit_qto(m, qto=q, properties={"NetFloorArea": area})

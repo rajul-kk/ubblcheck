@@ -290,11 +290,14 @@ def _fmt(v):
 
 
 def fire_resistance(group: str, height_m: float, floor_area_m2: float, volume_m3: float,
-                    storeys: int = 2, sprinklered: bool = False) -> FireResistance | None:
+                    storeys: int = 2, sprinklered: bool = False,
+                    compartment: bool = False) -> FireResistance | None:
     """Minimum FRP for elements of structure, or None if the building (or compartment)
     is larger than every line for its group, which means it has to be compartmented.
 
-    storeys: storeys at or above ground; 1 selects Part 2 (single storey buildings)."""
+    storeys: storeys at or above ground; 1 selects Part 2 (single storey buildings).
+    compartment: the area and volume are a compartment's.  Lines marked x apply to whole
+    buildings only (except in group III), so they are skipped."""
     if storeys <= 1:
         for g, area, hrs in _NINTH_2:
             if g == group and floor_area_m2 <= area:
@@ -303,6 +306,8 @@ def fire_resistance(group: str, height_m: float, floor_area_m2: float, volume_m3
         return None
     for g, nst, h, area, vol, up, base, marks in _NINTH_1:
         if g != group or (nst is not None and storeys > nst):
+            continue
+        if compartment and "x" in marks and group != "III":
             continue
         k = 2 if sprinklered and "y" in marks else 1
         if height_m <= h and floor_area_m2 <= area * k and volume_m3 <= vol * k:

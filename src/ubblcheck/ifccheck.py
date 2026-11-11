@@ -13,6 +13,7 @@ import os
 import re
 import xml.etree.ElementTree as ET
 from collections import defaultdict
+from dataclasses import dataclass, field
 
 import ifcopenshell
 import ifcopenshell.util.element as uel
@@ -191,15 +192,38 @@ def check_rules(model: ifcopenshell.file) -> list[Finding]:
     return out
 
 
-def dimensions(f: Facts) -> dict:
-    """Storey areas and volumes for the schedule look-ups.
+@dataclass
+class Sizes:
+    """Floor areas and volumes for the Ninth Schedule look-up, by storey and by compartment."""
+    storey_area: dict            # storey id -> m2
+    comp_area: dict              # compartment id -> largest storey area of the compartment, m2
+    comp_volume: dict            # compartment id -> m3
+    storey_comps: dict           # storey id -> compartment ids with a space on that storey
+    comp_spaces: list            # (storey id, space, compartment id), to place elements
+    building_area: float         # largest storey area of the building
+    building_volume: float
+    storeys: int                 # storeys at or above ground, not counting roof levels
+    footprints: dict = field(default_factory=dict)   # space id -> plan footprint, filled as needed
 
-    Returns the largest storey area and largest volume of any compartment (or of the
-    building, when no space carries a CompartmentId), the area of each storey, the total
-    floor area, and the number of storeys at or above ground."""
+    def footprint(self, space):
+        if space.id() not in self.footprints:
+            from . import geom
+            self.footprints[space.id()] = geom.footprint(geom.mesh(space))
+        return self.footprints[space.id()]
+
+    def basis(self, cid=None) -> tuple[str, float, float]:
+        """(label, storey area, volume) of a compartment, or of the building when cid is None."""
+        if cid is None:
+            return "building", self.building_area, self.building_volume
+        return f"compartment {cid}", self.comp_area[cid], self.comp_volume[cid]
+
+
+def dimensions(f: Facts) -> Sizes:
     st_area = defaultdict(float)
-    comp_area = defaultdict(float)
+    comp_st_area = defaultdict(float)
     comp_vol = defaultdict(float)
+    storey_comps = defaultdict(set)
+    comp_spaces = []
     total_vol = 0.0
     for sp in f.model.by_type("IfcSpace"):
         st = f.storey_of(sp)
@@ -211,18 +235,47 @@ def dimensions(f: Facts) -> dict:
         total_vol += v
         cid = _prop(sp, PSET, "CompartmentId")
         if cid is not None:
-            comp_area[(cid, st.id())] += a
+            cid = str(cid)
+            comp_st_area[(cid, st.id())] += a
             comp_vol[cid] += v
-    above = f.occupied
-    by_comp = bool(comp_area)
-    return {
-        "storey_area": dict(st_area),
-        "floor_area": max(comp_area.values() if by_comp else st_area.values(), default=0.0),
-        "volume": max(comp_vol.values(), default=0.0) if by_comp else total_vol,
-        "total_area": sum(st_area[s.id()] for s in above),
-        "storeys": len(above),
-        "basis": "largest compartment" if by_comp else "building",
-    }
+            storey_comps[st.id()].add(cid)
+            comp_spaces.append((st.id(), sp, cid))
+    comp_area = defaultdict(float)
+    for (cid, _), a in comp_st_area.items():
+        comp_area[cid] = max(comp_area[cid], a)
+    return Sizes(dict(st_area), dict(comp_area), dict(comp_vol), dict(storey_comps), comp_spaces,
+                 max(st_area.values(), default=0.0), total_vol, len(f.occupied))
+
+
+def _compartments_of(f: Facts, el, st, sizes: Sizes) -> list:
+    """The compartments an element of structure is in or bounds, for the Ninth Schedule.
+
+    In order: the element's own MY_FireSafety.CompartmentId (several separated by commas, for a
+    wall between compartments); else the compartments of the spaces its plan footprint touches;
+    else every compartment on its storey, so the element is held to the longest of their periods.
+    [None] means the building is not divided into compartments."""
+    own = _prop(el, PSET, "CompartmentId")
+    if own is not None:
+        ids = [c.strip() for c in re.split(r"[,;]", str(own)) if c.strip() in sizes.comp_area]
+        if ids:
+            return ids
+    on_storey = sorted(sizes.storey_comps.get(st.id(), ()))
+    if len(on_storey) > 1 and getattr(el, "Representation", None):
+        from . import geom
+        fp = geom.footprint(geom.mesh(el))
+        if fp is not None:
+            near = fp.buffer(0.3)
+            touched = set()
+            for sid, sp, cid in sizes.comp_spaces:
+                if sid == st.id() and cid not in touched:
+                    sfp = sizes.footprint(sp)
+                    if sfp is not None and sfp.intersects(near):
+                        touched.add(cid)
+            if touched:
+                return sorted(touched)
+    if on_storey:
+        return on_storey
+    return list(sizes.comp_area) or [None]
 
 
 # element class -> (common pset, kind)
@@ -247,17 +300,23 @@ def _structure(f: Facts):
 
 
 def _ninth(f: Facts, height):
+    """Ninth Schedule periods for elements of structure.  The line is chosen from the size of the
+    compartment each element is in (or bounds); without compartments, from the building."""
     out = []
-    d = dimensions(f)
-    if not d["storey_area"]:
+    sizes = dimensions(f)
+    if not sizes.storey_area:
         return out
-    req = ubbl.fire_resistance(f.group, height, d["floor_area"], d["volume"], d["storeys"], f.sprinklered)
-    if req is None:
-        return [Finding("IFC-FRP-SIZE", "info",
-                        f"{d['basis'].capitalize()} ({d['floor_area']:.0f} m2 storey, {d['volume']:.0f} m3) is larger "
-                        f"than every Ninth Schedule line for group {f.group} at {height:.1f} m; it must be "
-                        "compartmented (see IFC-COMP-AREA / IFC-COMP-VOL), so element periods are not checked",
-                        ubbl.NINTH_CLAUSE, [])]
+    reqs, too_big = {}, []
+
+    def requirement(cid):
+        if cid not in reqs:
+            label, area, vol = sizes.basis(cid)
+            reqs[cid] = ubbl.fire_resistance(f.group, height, area, vol, sizes.storeys, f.sprinklered,
+                                             compartment=cid is not None)
+            if reqs[cid] is None:
+                too_big.append((label, area, vol))
+        return reqs[cid]
+
     basements = {s.id() for s in f.basements}
     ground = min(f.above_ground, key=f.elev, default=None)
     over_basement = ground.id() if (basements and ground is not None) else None
@@ -271,25 +330,41 @@ def _ninth(f: Facts, height):
                 unread[kind].append(el)
             continue
         base = st.id() in basements or (kind == "floor" and st.id() == over_basement)
-        barea = d["storey_area"].get(st.id()) if st.id() in basements else None
-        need = ubbl.element_frp(req, kind, base, compartment, barea)
+        barea = sizes.storey_area.get(st.id()) if st.id() in basements else None
+        needs = []
+        for cid in _compartments_of(f, el, st, sizes):
+            req = requirement(cid)
+            if req is not None:
+                needs.append((ubbl.element_frp(req, kind, base, compartment, barea), sizes.basis(cid)[0], req))
+        if not needs:
+            continue                # every compartment it is in is oversized: IFC-FRP-SIZE below
+        need, label, req = max(needs, key=lambda n: n[0])
         if have < need:
-            short[(st.Name, kind, need)].append((el, have))
+            short[(st.Name, kind, need, label, req.line)].append((el, have))
+    if too_big:
+        what = "; ".join(f"{label} ({area:.0f} m2 storey, {vol:.0f} m3)" for label, area, vol in too_big[:6])
+        more = f" and {len(too_big) - 6} more" if len(too_big) > 6 else ""
+        out.append(Finding("IFC-FRP-SIZE", "info",
+                           f"Larger than every Ninth Schedule line for group {f.group} at {height:.1f} m: {what}{more}. "
+                           "Each must be compartmented (see IFC-COMP-AREA / IFC-COMP-VOL), so the periods of "
+                           "their elements are not checked", ubbl.NINTH_CLAUSE, [],
+                           {"oversized": [{"basis": label, "area_m2": round(area), "volume_m3": round(vol)}
+                                          for label, area, vol in too_big]}))
     if unread:
         n = sum(map(len, unread.values()))
         out.append(Finding("IFC-FRP-DATA", "warning",
                            f"{n} element(s) of structure have no FireRating the checker can read "
                            f"({', '.join(f'{len(v)} {k}' for k, v in sorted(unread.items()))}); their Ninth "
                            "Schedule period was not checked. Use minutes (60, FRP 60 min, REI 60) or hours (1 HR)",
-                           req.clause, [e.GlobalId for v in unread.values() for e in v],
+                           ubbl.NINTH_CLAUSE, [e.GlobalId for v in unread.values() for e in v],
                            {"by_kind": {k: len(v) for k, v in unread.items()}}))
-    for (storey, kind, need), els in sorted(short.items(), key=lambda kv: (str(kv[0][0]), kv[0][1])):
+    for (storey, kind, need, label, line), els in sorted(short.items(), key=lambda kv: tuple(map(str, kv[0]))):
         worst = min(h for _, h in els)
         out.append(Finding("IFC-FRP", "error",
-                           f"{storey}: {len(els)} {kind}(s) below the {need} min the "
-                           f"Ninth Schedule requires (lowest {worst} min; {req.line}; {d['basis']})", req.clause,
+                           f"{storey}: {len(els)} {kind}(s) below the {need} min the Ninth Schedule requires "
+                           f"(lowest {worst} min; {line}; {label})", ubbl.NINTH_CLAUSE,
                            [e.GlobalId for e, _ in els],
-                           {"required_min": need, "lowest_min": worst, "line": req.line, "basis": d["basis"]}))
+                           {"required_min": need, "lowest_min": worst, "line": line, "basis": label}))
     return out
 
 
