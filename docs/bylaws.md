@@ -49,7 +49,7 @@ needs a drawing checklist item to cite it. A by-law the code cites can't be mark
 | 168 | Staircases | data | shown | Escape stair flag (MY-P13); stair widths not judged |
 | 169–171 | Exit routes, unenclosed openings, horizontal exits | data | — | Data asked for; routes not judged |
 | 172 | Exit signs | data | shown | Drawings P13 |
-| 173 | Exit doors | data | — | Possible: door swing against direction of travel |
+| 173 | Exit doors | checked | — | (2) exit doors self-closing (IFC-DOORCLOSER). (1) opening without a key, and release on power failure or alarm, are hardware |
 | 174 | Arrangement of storey exits | checked | — | (1) two exits at least 5 m apart, edge to edge, on plan (GEO-EXIT-SPACING). (2) where each exit leads, and (3) the services exemption, are not judged |
 | 175 | Occupant load | checked | shown | Seventh Schedule loads; drawings: calculation table (PG2) |
 | 176 | Storey exit width | checked | shown | IFC-EXIT-WIDTH |
@@ -77,10 +77,10 @@ needs a drawing checklist item to cite it. A by-law the code cites can't be mark
 | 235 | Fixed installations | — | shown | P09 |
 | 236 | Special hazards | — | — | Case by case |
 | 237 | Fire alarms | checked | shown | Through the Tenth Schedule (IFC-TENTH-1, -2); drawings P15, AO3 |
-| 238 | Command and control centre | — | — | Possible: room presence in tall buildings |
+| 238 | Command and control centre | checked | — | Over 30.5 m, a space named as the command centre, in English or Malay (IFC-COMMAND-CENTRE, warning); its panels are not judged |
 | 239 | Voice communication | — | shown | P16, AO2 |
 | 240–241 | Isolation switch; alarm system details | — | — | M&E detail |
-| 242 | Fire-fighting access lobbies | — | — | Possible, with 229 |
+| 242 | Fire-fighting access lobbies | checked | — | (a) each lobby, found by name, at least 5.57 m² (IFC-FIRE-LOBBY); (b) ventilation is not judged |
 | 243 | Fire lift | checked | shown | IFC-FIRELIFT; drawings P17 |
 | 244–246 | Standards, approval, certification | — | — | Administrative |
 | 247 | Water storage | — | shown | A02, AS2 |

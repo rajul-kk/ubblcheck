@@ -358,3 +358,51 @@ def test_unknown_occupancy_use_is_reported(write):
     assert len(occ) == 1 and occ[0].where == [sp.GlobalId] and "ballroom" in occ[0].message
     f = ifccheck.Facts(m)
     assert f.persons(sp) is None and f.persons(m.by_type("IfcSpace")[1]) == 40   # 400 m2 at 10 m2 a person
+
+
+def test_exit_doors_close_by_themselves(write):
+    m = ifcmodel.office(storeys=1, door_frp=None, self_closing=False)     # exit doors, not fire doors
+    fs = [x for x in ifccheck.check(write(m)) if x.rule == "IFC-DOORCLOSER"]
+    assert len(fs) == 2 and all(x.clause == "UBBL by-law 173(2)" and "exit door" in x.message for x in fs)
+    m = ifcmodel.office(storeys=1, self_closing=False)                     # rated exit doors: both by-laws
+    fs = [x for x in ifccheck.check(write(m)) if x.rule == "IFC-DOORCLOSER"]
+    assert fs and fs[0].clause == "UBBL by-law 164(1), 173(2)"
+
+
+def _named_space(m, name, area):
+    import ifcopenshell.api.aggregate as agg
+    import ifcopenshell.api.root as root
+    sp = root.create_entity(m, ifc_class="IfcSpace", name="X1")
+    sp.LongName = name
+    agg.assign_object(m, products=[sp], relating_object=m.by_type("IfcBuildingStorey")[0])
+    ifcmodel._ps(m, sp, "MY_FireSafety", {"CompartmentId": "C0-0"})
+    ifcmodel._qto(m, sp, "Qto_SpaceBaseQuantities", {"NetFloorArea": area, "Height": 3.5})
+    return sp
+
+
+def test_tall_building_rooms(write):
+    r = rules(ifccheck.check(write(ifcmodel.office(storeys=2, height=35.0))))
+    assert r["IFC-COMMAND-CENTRE"] == 1
+    m = ifcmodel.office(storeys=2, height=35.0)
+    _named_space(m, "Bilik Kawalan Bomba", 20)
+    small = _named_space(m, "Fire Fighting Lobby", 4.0)
+    _named_space(m, "Lobi Bomba", 6.0)
+    fs = ifccheck.check(write(m))
+    assert not rules(fs)["IFC-COMMAND-CENTRE"]
+    lob = [x for x in fs if x.rule == "IFC-FIRE-LOBBY"]
+    assert [x.where for x in lob] == [[small.GlobalId]] and lob[0].clause == "UBBL by-law 242(a)"
+    assert not rules(ifccheck.check(write(ifcmodel.office(storeys=2, height=30.0))))["IFC-COMMAND-CENTRE"]
+
+
+@pytest.mark.parametrize("name, centre, lobby", [
+    ("Fire Command Centre", True, False), ("Command & Control Centre", True, False),
+    ("Bilik Kawalan Bomba", True, False), ("Bilik Kawalan CCTV", False, False),
+    ("Pusat Kawalan Keselamatan", False, False), ("Firefighters' Lobby", False, True),
+    ("Fire Fighting Lift Lobby", False, True), ("Fireman's Lobby", False, True),
+    ("Lobi Lif Bomba", False, True), ("Landing FFL +3.000", False, False), ("Lift Lobby", False, False),
+])
+def test_room_names(name, centre, lobby):
+    import ifcopenshell
+    sp = ifcopenshell.file(schema="IFC4").createIfcSpace(Name="01", ObjectType=name)   # a Revit room type
+    assert ifccheck.named(sp, ifccheck._COMMAND_CENTRE) is centre
+    assert ifccheck._fire_lobby(sp) is lobby

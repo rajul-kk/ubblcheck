@@ -74,8 +74,10 @@ passive and active sets.
 | IFC-EXIT-WIDTH | Occupant load against units of 550 mm exit width | by-law 175–176 |
 | IFC-COMP-FLOOR | In buildings over 30 m, floors more than 9 m up are compartment floors | by-law 137 |
 | IFC-FIREDOOR | A door in a compartment wall has an FRP of at least 30 min, and is warned if weaker than the wall | by-law 162 |
-| IFC-DOORCLOSER | No door rated 30 min or more is declared not self-closing; one warning lists the fire doors that don't say | by-law 164(1) |
+| IFC-DOORCLOSER | No fire door (rated 30 min or more) or exit door is declared not self-closing; one warning lists the doors that don't say | by-law 164(1), 173(2) |
 | IFC-FRP | Elements of structure against the Ninth Schedule; loadbearing external walls at least 30 min and separating walls at least 60 min whatever the line | by-law 213, 214(1), 216 |
+| IFC-COMMAND-CENTRE | Over 30.5 m, a space named as the command and control centre (warning: found by name) | by-law 238 |
+| IFC-FIRE-LOBBY | A space named as a fire-fighting access lobby has at least 5.57 m² (a warning when its area can't be read) | by-law 242(a) |
 | IFC-RISER, IFC-FIRELIFT | A topmost floor over 18.3 m needs a rising system and a fire lift | by-law 229–231 |
 
 ## Limits and open points
@@ -96,6 +98,11 @@ passive and active sets.
   two-exit rule though each unit has one. By-law 194 then applies unit by
   unit, which the checker cannot see. Stair widths are not checked: the
   model has no width property the checker can rely on.
+- **Rooms found by name.** The command centre and fire-fighting lobbies are
+  recognised from the space's Name, LongName or room type, in English or
+  Malay. A room with another name is missed, so a missing command centre
+  is a warning. Without `BuildingHeight`, the 30.5 m test uses the top
+  storey's elevation, which is lower than the by-law 135(a) height.
 - **Ninth Schedule: listed elements only.** Element FRP is checked against the
   Ninth Schedule for walls, floors, columns and beams. Notional periods of
   materials (Part 2) are not encoded.
