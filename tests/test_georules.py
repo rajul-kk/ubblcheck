@@ -5,7 +5,7 @@ import os
 import pytest
 
 import geomodel as G
-from ubblcheck import geom, georules, rooms, travel
+from ubblcheck import geom, georules, rooms, travel, ubbl
 from ubblcheck.model import Facts
 
 
@@ -247,33 +247,41 @@ def test_exit_without_plan_geometry_is_a_warning():
 
 
 def _risk_floor(door="60", wall_ratings=("120",) * 4, own_walls=True, partition=False, thick_partition=False,
-                door_geometry=True):
-    """A shop floor with a 4 x 4 m boiler room in the middle, walled and doored as given."""
+                door_geometry=True, room="Boiler Room", window=False, rule="GEO-RISK-ROOM", external=(),
+                group="V", width=4.0, door_hosted=True):
+    """A shop floor with a `width` x 4 m room in the middle (a boiler room unless named otherwise),
+    walled and doored as given."""
     import ifcopenshell.api.pset as pset
     import ifcopenshell.util.element as ue
 
     def rate(e, ps, r):
         pset.edit_pset(md.m, pset=md.m.by_id(ue.get_psets(e)[ps]["id"]), properties={"FireRating": r or ""})
 
-    md, st = one_storey(20, 10, ((0, 2.0), (0, 18.0)), group="V")
+    md, st = one_storey(20, 10, ((0, 2.0), (0, 18.0)), group=group)
+    x1 = 8 + width
     named = {}
     if own_walls:
-        corners = [(8, 3), (12, 3), (12, 7), (8, 7)]
+        corners = [(8, 3), (x1, 3), (x1, 7), (8, 7)]
         walls = [md.wall(st, corners[i], corners[(i + 1) % 4], 0.0, name=f"BR-W{i}") for i in range(4)]
         for w, r in zip(walls, wall_ratings):
             rate(w, "Pset_WallCommon", r)
-        named["door"] = md.door(st, walls[0], 2.0, name="BR-D")
+        for i in external:
+            pset.edit_pset(md.m, pset=md.m.by_id(ue.get_psets(walls[i])["Pset_WallCommon"]["id"]),
+                           properties={"IsExternal": True})
+        named["door"] = md.door(st, walls[0] if width > 1 else walls[1], 2.0, name="BR-D", hosted=door_hosted)
         rate(named["door"], "Pset_DoorCommon", door)
         if not door_geometry:           # a door the geometry kernel can't read: still in its wall
             named["door"].Representation = None
             named["door"].FillsVoids[0].RelatingOpeningElement.Representation = None
         named["walls"] = walls
+        if window:
+            named["window"] = md.window(st, walls[2], 2.0, name="BR-WIN")
     if partition:       # an unrated corridor partition butting against the room's east wall
         named["partition"] = md.wall(st, (12.1, 5.0), (16.0, 5.0), 0.0, name="P1")
     if thick_partition:  # a 0.6 m masonry wall butting on end-first
         named["partition"] = md.wall(st, (12.1, 5.0), (16.0, 5.0), 0.0, name="P2", thickness=0.6)
-    named["room"] = md.space(st, G.rect(8.1, 3.1, 11.9, 6.9), 0.0, "B01", long_name="Boiler Room")
-    return [x for x in georules.check(md.m) if x.rule == "GEO-RISK-ROOM"], named
+    named["room"] = md.space(st, G.rect(8.1, 3.1, x1 - 0.1, 6.9), 0.0, "B01", long_name=room)
+    return [x for x in georules.check(md.m) if x.rule == rule], named
 
 
 def test_risk_room_walled_off_passes():
@@ -303,3 +311,150 @@ def test_risk_room_door_without_geometry_is_still_checked():
 def test_risk_room_with_no_walls_is_reported():
     fs, n = _risk_floor(own_walls=False)
     assert len(fs) == 1 and "no wall was found" in fs[0].message and fs[0].where == [n["room"].GlobalId]
+
+
+def test_protected_shaft():
+    fs, _ = _risk_floor(room="Pipe Shaft", rule="GEO-SHAFT")              # rated walls and a fire door
+    assert fs == []
+    fs, n = _risk_floor(room="Pipe Shaft", rule="GEO-SHAFT", window=True)  # a rated window is still not allowed
+    assert [x.where for x in fs] == [[n["room"].GlobalId, n["window"].GlobalId]]
+    assert "not allowed" in fs[0].message and fs[0].clause == "UBBL by-law 150"
+    fs, _ = _risk_floor(room="Boiler Room", window=True)                 # a risk room may have a rated window
+    assert fs == []
+    fs, n = _risk_floor(room="Riser", rule="GEO-SHAFT", wall_ratings=("120", "30", "120", "120"))
+    assert [x.where for x in fs] == [[n["room"].GlobalId, n["walls"][1].GlobalId]]
+
+
+@pytest.mark.parametrize("name, shaft", [("Pipe Shaft", True), ("Lift Shaft 2", True), ("Lift", True), ("Lif 3", True),
+                                         ("M&E Riser", True), ("Service Duct", True), ("Syaf Paip", True),
+                                         ("Elev", True), ("ELEV EQ RM", False), ("Lift Lobby", False), ("Productions", False), ("Conduct room", False)])
+def test_shaft_names(name, shaft):
+    assert bool(rooms.SHAFT.search(name)) is shaft
+
+
+def test_shaft_checked_whatever_the_purpose_group():
+    fs, n = _risk_floor(room="Riser", rule="GEO-SHAFT", group=None, wall_ratings=("120", "30", "120", "120"))
+    assert [x.where for x in fs] == [[n["room"].GlobalId, n["walls"][1].GlobalId]]
+
+
+def test_shaft_drawn_as_a_void_is_checked():
+    fs, n = _risk_floor(room="Shaft Void", rule="GEO-SHAFT", wall_ratings=("120", "30", "120", "120"))
+    assert [x.where for x in fs] == [[n["room"].GlobalId, n["walls"][1].GlobalId]]
+
+
+def test_unhosted_door_on_an_enclosing_wall_is_checked():
+    fs, n = _risk_floor(room="Riser", rule="GEO-SHAFT", door=None, door_hosted=False)
+    assert [x.where for x in fs] == [[n["room"].GlobalId, n["door"].GlobalId]]
+    fs, _ = _risk_floor(room="Riser", rule="GEO-SHAFT", door_hosted=False)
+    assert fs == []
+
+
+def test_narrow_duct_end_walls_enclose_it():
+    fs, n = _risk_floor(room="Service Duct", rule="GEO-SHAFT", width=0.6, wall_ratings=("30", "120", "120", "120"))
+    assert [x.where for x in fs] == [[n["room"].GlobalId, n["walls"][0].GlobalId]]
+
+
+def test_room_walled_only_by_external_walls_gives_no_finding():
+    fs, _ = _risk_floor(room="Riser", rule="GEO-SHAFT", wall_ratings=(None,) * 4, external=(0, 1, 2, 3))
+    assert fs == []
+
+
+def test_external_walls_of_a_risk_room_are_not_held_to_the_period():
+    fs, _ = _risk_floor(wall_ratings=("120", "30", "120", "120"), external=(1,))
+    assert fs == []                 # the weak wall faces outside: it separates the room from the open air
+
+
+@pytest.mark.parametrize("capacity, cls, exits", [(99, None, 0), (100, "C", 2), (299, "C", 2), (300, "B", 2),
+                                                  (600, "B", 2), (601, "B", 3), (999, "B", 3), (1000, "A", 4)])
+def test_assembly_class_and_exits(capacity, cls, exits):
+    assert ubbl.assembly_class(capacity) == cls and ubbl.assembly_exits(capacity) == exits
+
+
+@pytest.mark.parametrize("mm, units", [(500, 0), (552, 1), (851, 1), (852, 1.5), (1104, 2), (1404, 2.5)])
+def test_assembly_exit_units(mm, units):
+    assert ubbl.assembly_units(mm) == units
+
+
+def _hall(W=20, D=10, exits=((0, 2.0),), long_name="Auditorium", seats=None, group="VII", sprinklered=False,
+          widths=None):
+    """One storey that is one room; the exit doors' widths (m) are set after building when given."""
+    md = G.Model(group=group, sprinklered=sprinklered)
+    st = md.storey("L0", 0.0)
+    _, sp = G.box_floor(md, st, W, D, exits=exits, long_name=long_name)
+    if seats is not None:
+        G._ps(md.m, sp, "MY_FireSafety", {"FixedSeats": seats})
+    doors = md.m.by_type("IfcDoor")
+    for d, w in zip(doors, widths or ()):
+        d.OverallWidth = w
+    return md, sp, doors
+
+
+def _assembly(md):
+    return [x for x in georules.check(md.m) if x.rule.startswith("GEO-ASSEMBLY")]
+
+
+def test_assembly_room_capacity_from_area_or_seats():
+    md, sp, _ = _hall(long_name="Auditorium")
+    persons, how = georules.assembly_capacity(sp, 195.0)
+    assert persons == 300 and "0.65" in how                        # 195 / 0.65
+    md, sp, _ = _hall(long_name="Conference Room", seats=120)
+    assert georules.assembly_capacity(sp, 195.0)[0] == 120   # fixed seats count, not area
+    for name in ("Office", "Entrance Hall", "Lift Lobby"):
+        md, sp, _ = _hall(long_name=name)
+        assert georules.assembly_capacity(sp, 195.0) is None
+
+
+def test_assembly_room_with_too_few_or_too_narrow_exits():
+    md, sp, doors = _hall()                     # ~190 m2 of auditorium: about 290 persons, class C
+    fs = _assembly(md)
+    assert sorted(x.rule for x in fs) == ["GEO-ASSEMBLY-EXITS", "GEO-ASSEMBLY-WIDTH"]
+    assert all(x.severity == "error" for x in fs) and "class C" in fs[0].message
+    md, sp, doors = _hall(exits=((0, 2.0), (2, 2.0)), widths=(1.7, 1.7))   # 3 units each: 600 persons
+    assert _assembly(md) == []
+    md, sp, doors = _hall(exits=((0, 2.0), (2, 2.0), (1, 5.0)), widths=(2.3, 2.3, 0.6))
+    fs = _assembly(md)
+    assert [x.where for x in fs] == [[doors[2].GlobalId]] and "700 mm" in fs[0].message
+
+
+def test_assembly_door_without_width_is_a_warning():
+    md, sp, doors = _hall(exits=((0, 2.0), (2, 2.0)), widths=(1.1, None))   # 1.5 units known: 150 persons
+    fs = _assembly(md)
+    assert [(x.rule, x.severity) for x in fs] == [("GEO-ASSEMBLY-WIDTH", "warning")]
+    assert "no width given" in fs[0].message
+
+
+def test_assembly_travel_limit():
+    lim = ubbl.assembly_travel(ubbl.travel_limit("VII", True), sprinklered=True)    # the schedule's 61 m
+    assert (lim.travel_m, lim.clause) == (60, "UBBL by-law 188")
+    tight = ubbl.travel_limit("VI", False)                                            # 30 m: already within
+    assert ubbl.assembly_travel(tight, sprinklered=False) is tight
+    assert ubbl.assembly_travel(ubbl.TravelLimit(None, None), sprinklered=False).travel_m == 45   # no limit of its own
+
+
+@pytest.mark.parametrize("name, persons", [
+    ("Auditorium", 200), ("Dewan Serbaguna", 200), ("Surau", 200), ("Dance Floor", 200),     # 130 m2 / 0.65
+    ("Dining Hall", 97), ("Dewan Makan", 97), ("Conference Hall", 97), ("Ruang Pameran", 97),  # / 1.35
+    ("Exhibition Hall", 97), ("Gymnasium", 97), ("Waiting Hall", 44),                         # / 3
+    ("Guidance Room", None), ("Attendance Office", None), ("Rebar Store", None), ("Entrance Hall", None),
+    ("Lift Lobby", None), ("Hallway", None), ("Office", None)])
+def test_assembly_load_from_room_name(name, persons):
+    import ifcopenshell
+    m = ifcopenshell.file(schema="IFC4")            # kept alive: the space dies with its file
+    sp = m.createIfcSpace(GlobalId=ifcopenshell.guid.new(), Name="R1", LongName=name)
+    cap = georules.assembly_capacity(sp, 130.0)
+    assert (cap and cap[0]) == persons
+
+
+def test_shaft_on_a_long_wall_ignores_other_rooms_openings():
+    """A riser at the end of a long corridor wall: the office door and window further along the
+    same wall are not the riser's."""
+    md, st = one_storey(30, 10, ((0, 2.0), (0, 28.0)), group="IV")
+    long_wall = md.wall(st, (0.0, 5.0), (30.0, 5.0), 0.0, name="CW")
+    others = {md.door(st, long_wall, 15.0, name="OFFICE-D").GlobalId,
+              md.window(st, long_wall, 20.0, name="OFFICE-WIN").GlobalId}
+    near = md.window(st, long_wall, 1.0, name="RISER-WIN").GlobalId
+    md.wall(st, (2.0, 5.0), (2.0, 10.0), 0.0, name="RW1")
+    md.wall(st, (0.0, 7.0), (2.0, 7.0), 0.0, name="RW2")
+    md.space(st, G.rect(0.1, 5.1, 1.9, 6.9), 0.0, "R01", long_name="Riser")
+    fs = [x for x in georules.check(md.m) if x.rule == "GEO-SHAFT"]
+    assert len(fs) == 1 and near in fs[0].where and not others & set(fs[0].where)

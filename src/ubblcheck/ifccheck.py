@@ -80,7 +80,7 @@ def check_rules(model: ifcopenshell.file) -> list[Finding]:
                            f"BuildingHeight not given; using top storey elevation {f.height_m:.1f} m "
                            "(lower than the by-law 135(a) height)", "UBBL by-law 135(a)", []))
     for rule in (_compartments, _travel, _occupancy_uses, _exits, _compartment_floors, _fire_doors,
-                 _door_closers, _ninth, _systems, _tenth, _tall_building_rooms, _foam_inlets):
+                 _door_closers, _ninth, _systems, _tenth, _tall_building_rooms, _foam_inlets, _smoke_vents):
         out += rule(f)
     return out
 
@@ -414,7 +414,7 @@ def _fire_doors(f: Facts):
             out.append(Finding("IFC-FIREDOOR", "error",
                                f"Door {name} is in compartment wall {label(wall)} but has no fire rating",
                                "UBBL by-law 162(1)-(2)", [d.GlobalId, wall.GlobalId]))
-        elif dr < ubbl.FIRE_DOOR_FRP_MIN[0]:
+        elif dr < ubbl.FIRE_DOOR_FRP_MIN:
             out.append(Finding("IFC-FIREDOOR", "error", f"Door {name}: FRP {dr} min is below half an hour",
                                "UBBL by-law 162(3)", [d.GlobalId]))
         elif wr is not None and dr < wr:
@@ -434,7 +434,7 @@ def _door_closers(f: Facts):
     out, unknown = [], []
     for d in f.model.by_type("IfcDoor"):
         r = rating(d)
-        why = [w for w, applies in (("fire door", r is not None and r >= ubbl.FIRE_DOOR_FRP_MIN[0]),
+        why = [w for w, applies in (("fire door", r is not None and r >= ubbl.FIRE_DOOR_FRP_MIN),
                                     ("exit door", common(d, "FireExit") is True)) if applies]
         if not why:
             continue
@@ -506,6 +506,27 @@ def _foam_inlets(f: Facts) -> list[Finding]:
                     f"Boiler room or storage below ground ({shown}) in a building without automatic sprinklers, "
                     "and no foam inlet is modelled (IfcFireSuppressionTerminal typed FOAMINLET, or named "
                     "'foam inlet')", "UBBL by-law 233", [sp.GlobalId for sp in below])]
+
+
+def _smoke_vents(f: Facts) -> list[Finding]:
+    """By-law 249: underground storeys and windowless buildings have smoke venting for the exits.  A
+    vent is any element named as a smoke vent or extract; any one in the model counts, since models
+    don't link vents to the floors they serve.  Large-area factories are left out: the by-law sets no
+    size.  A warning: architectural models often leave vents out."""
+    under = [st for st in f.basements if st in f.floor_storeys]
+    why = [f"underground storey {label(st)}" for st in under]
+    if f.floor_storeys and not any(f.model.by_type(c) for c in ("IfcWindow", "IfcCurtainWall")):
+        why.append("no windows or glazed walls in the building")
+    if not why or any(named(e, rooms.SMOKE_VENT) for c in _VENT_CLASSES for e in f.model.by_type(c)):
+        return []
+    return [Finding("IFC-SMOKE-VENT", "warning",
+                    f"Smoke venting is required ({'; '.join(why)}) and no smoke vent or extract is modelled "
+                    "(an element named e.g. 'Smoke Vent', 'Smoke Extract Fan', 'Pelega Asap')", "UBBL by-law 249",
+                    [st.GlobalId for st in under] or ([f.building.GlobalId] if f.building else []))]
+
+
+# where vents are modelled: fans, dampers and air terminals, roof vents and openable windows, proxies
+_VENT_CLASSES = ("IfcDistributionElement", "IfcWindow", "IfcDoor", "IfcBuildingElementProxy", "IfcOpeningElement")
 
 
 # ---------------------------------------------------------------- active systems

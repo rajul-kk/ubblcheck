@@ -27,12 +27,37 @@ RISK_ROOM = re.compile(r"boiler|laundr|linen|\bLPG\b|gas (store|storage|room)|ge
                        r"|substation|hazardous|\bdobi\b|dandang|janakuasa|pengubah|pencawang|bilik (linen|gas|genset)",
                        re.I)
 
+# by-law 150: shafts, risers and ducts, and a lift well named only "Lift" or "Elev" ("Lift Lobby" is
+# not one).  Stairs are left to by-laws 189 and 197.
+SHAFT = re.compile(r"\bshafts?\b|\bsyaf\b|\briser\b|\bducts?\b|\blift ?well\b|\bpipe ?chase\b"
+                   r"|^\s*(lift|lif|elev|elevator)\s*\d*\s*$", re.I)
+
 # by-law 233: boiler rooms and storage areas ('store' alone is left out: in English it is as often a
 # shop as a storage room)
 BOILER_OR_STORE = re.compile(r"boiler|dandang|storage|store ?room|\bstores\b|\bstor\b|gudang", re.I)
 
+# by-law 249: smoke (and heat) vents, extract and relief; SHEV, and AOV (automatic opening vent)
+SMOKE_VENT = re.compile(r"smoke[\s_-]*((and|&)\s*heat\s*)?(vent|extract|exhaust|outlet|hatch|spill|relief)"
+                        r"|\bSHEVS?\b|\bAOV\b|(pelega|bolong|ekzos|lubang)\s+asap|asap\s+pelega", re.I)
+
 FOAM_INLET = re.compile(r"foam[\s_-]*inlet|inlet[\s_-]*(busa|buih)|(busa|buih)[\s_-]*inlet"
                         r"|salur masuk (busa|buih)", re.I)
+
+# by-law 180: assembly areas by how densely they are used.  (a) concentrated, without fixed seats;
+# (b) less concentrated; (c) standing room or waiting space.
+# Tried in this order, so a 'Dining Hall' or 'Dewan Makan' is less concentrated, not a hall.
+ASSEMBLY_USE = (
+    ("standing", re.compile(r"\b(waiting|ruang menunggu|standing)", re.I)),
+    ("less_concentrated", re.compile(r"\b(conference|persidangan|dining|makan|restaurant|restoran|canteen|kantin"
+                                     r"|food court|bar\b|exhibit|pameran|gym|lounge|banquet|function room|ballroom)",
+                                     re.I)),
+    ("concentrated", re.compile(r"\b(auditorium|hall|dewan|surau|mosque|masjid|church|gereja|temple|kuil|tokong"
+                                r"|prayer|worship|dance|lodge|cinema|panggung|theat(re|er)|lecture|kuliah)", re.I)),
+)
+# rooms people pass through: not places of assembly (an entrance hall is no hall), and ancillary
+CIRCULATION = re.compile(r"\b(entry|entrance|lift|lif|stair)\s*hall|\blobb(y|ies)\b|\blobi\b|\bfoyer\b"
+                         r"|\bcorridor|\bkoridor\b|\bhallway|\bpassage|\blaluan\b", re.I)
+
 
 # room-use words -> purpose group (by-law 134).  Ancillary rooms carry no group.
 USE_WORDS = [
@@ -45,8 +70,7 @@ USE_WORDS = [
             r"classroom|bilik darjah|lecture|gym|function room|banquet|lounge"),
     ("VIII", r"store|stor|storage|warehouse|gudang|car ?park|parking|letak kereta|garage|archive|loading"),
 ]
-ANCILLARY = re.compile(r"toilet|tandas|wc|lobby|lobi|corridor|koridor|hallway|(entry|entrance) hall|foyer|"
-                       r"passage|laluan|stair|tangga|lift|riser|shaft|"
+ANCILLARY = re.compile(CIRCULATION.pattern + r"|toilet|tandas|wc|stair|tangga|lift|riser|shaft|"
                        r"plant|m&e|electrical|genset|pump|pam|janitor|pantry|ahu|duct|void", re.I)
 
 

@@ -170,8 +170,8 @@ class Facts:
         self.above_ground = [s for s in self.storeys if not self.is_basement(s)]
         # a roof or services level exported as a storey holds no spaces (or only voids); it is not a
         # storey of the building
-        with_spaces = {self.storey_of(sp) for sp in model.by_type("IfcSpace") if not not_floor(sp)}
-        occupied = [s for s in self.above_ground if s in with_spaces]
+        self.floor_storeys = {self.storey_of(sp) for sp in model.by_type("IfcSpace") if not not_floor(sp)} - {None}
+        occupied = [s for s in self.above_ground if s in self.floor_storeys]
         self.occupied = occupied if occupied else self.above_ground
         self._meshes, self._footprints, self._volumes = {}, {}, {}
 

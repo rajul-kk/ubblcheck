@@ -18,6 +18,7 @@ import math
 import os
 import re
 from collections import defaultdict
+from dataclasses import dataclass
 
 import ifcopenshell
 import ifcopenshell.util.placement as uplace
@@ -36,6 +37,18 @@ def _z(product, scale) -> float:
     return float(getattr(product, "Elevation", 0.0) or 0.0) * scale
 
 
+class _Wall:
+    """A wall (or curtain wall) cut in plan, with what the enclosure checks ask of it, worked out once."""
+
+    def __init__(self, el, cut):
+        self.el, self.cut = el, cut
+        self.near = cut.buffer(TOUCH_M)
+        # a thin strip's area is about half its perimeter times its thickness, whatever its shape
+        # (straight, L-shaped, curved); a cut with no area has none
+        self.thick = 2 * cut.area / cut.length if cut.area > 0 else 0.0
+        self.external = common(el, "IsExternal") is True
+
+
 class Plan:
     """One storey in plan: floor spaces, cut walls, doors, and its exits.  The exits are the ones
     the exit count uses (Facts.exits): exit doors, or on a storey with none, the escape stairs coming
@@ -43,26 +56,22 @@ class Plan:
 
     def __init__(self, f: Facts, storey, by_storey):
         """by_storey: the storey's elements by class (_by_storey)."""
-        self.storey = storey
+        self.storey, self._facts = storey, f
         self.z = _z(storey, f.scale)
         cut = self.z + geom.CUT_HEIGHT
-        self.spaces = []
-        for sp in by_storey["IfcSpace"]:
-            if not_floor(sp):
-                continue
-            fp = f.footprint(sp)
-            if fp is not None and fp.area > 0.05:
+        self.all_spaces = list(by_storey["IfcSpace"])    # voids and area zones too
+        self.spaces = []                                 # (floor space, outline)
+        for sp in self.all_spaces:
+            if not not_floor(sp) and (fp := self.outline(sp)) is not None and fp.area > 0.05:
                 self.spaces.append((sp, fp))
         cuts = [(e, geom.section(f.mesh(e), cut)) for t in ("IfcWall", "IfcColumn", "IfcCurtainWall")
                 for e in by_storey[t]]
-        self.walls = [(e, c) for e, c in cuts if c is not None and not e.is_a("IfcColumn")]   # walls, curtain walls
-        self.openings = list(by_storey["IfcDoor"]) + list(by_storey["IfcWindow"])   # with or without geometry
+        self.walls = [_Wall(e, c) for e, c in cuts if c is not None and not e.is_a("IfcColumn")]
+        self.openings = [(o, geom.door_outline(o)) for t in ("IfcDoor", "IfcWindow")
+                         for o in by_storey[t]]      # (door or window, outline or None)
         self.obstacles = [c for _, c in cuts]
-        self.doors = []
-        for d in by_storey["IfcDoor"]:
-            o = geom.door_outline(d)
-            if o is not None and not o.is_empty:
-                self.doors.append((d, o))
+        self.doors = [(d, o) for d, o in self.openings
+                      if d.is_a("IfcDoor") and o is not None and not o.is_empty]
         elements, self.via_stairs = f.exits.get(storey, ([], False))
         outline = dict((d.id(), o) for d, o in self.doors)
         self.exit_elements, self.exits_without_plan = [], []
@@ -81,6 +90,15 @@ class Plan:
     @property
     def name(self):
         return label(self.storey)
+
+    def outline(self, sp):
+        """A space's plan outline, or None (Facts caches it, so ask only for the spaces you need)."""
+        fp = self._facts.footprint(sp)
+        return None if fp is None or fp.is_empty else fp
+
+    def room_doors(self, poly):
+        """(door, outline) for the doors in a room's walls."""
+        return [(d, o) for d, o in self.doors if o.buffer(travel.CLEARANCE).intersects(poly)]
 
     def solve(self, cell):
         if not self.spaces or not self.exits:
@@ -154,10 +172,12 @@ def _travel(f: Facts, plans, heat_dir, cell, heatmaps):
             os.makedirs(heat_dir, exist_ok=True)
             heatmaps[_heatmap_key(pl, heatmaps)] = travel.heatmap(fld, lim.travel_m, _heatmap_path(heat_dir, pl, heatmaps))
         for sp, poly in pl.spaces:
-            rd = [o for d, o in pl.doors if o.buffer(travel.CLEARANCE).intersects(poly)]
+            rd = [o for _, o in pl.room_doors(poly)]
             r = travel.space_travel(fld, poly, rd)
             if r is not None:
-                out += _space_travel_findings(f, f"{pl.name} {label(sp)}", sp, poly, r, fld, lim,
+                out += _space_travel_findings(f, f"{pl.name} {label(sp)}", sp, poly, r, fld,
+                                              ubbl.assembly_travel(lim, f.sprinklered)
+                                              if _assembly_room(f, sp, poly) else lim,
                                               open_plan or prop(sp, PSET, "OpenPlan") is True)
     return out
 
@@ -181,51 +201,147 @@ def _exit_spacing(f: Facts, plans) -> list[Finding]:
     return out
 
 
-TOUCH_M = 0.3           # a wall this close to a room's outline may enclose it ...
-ENCLOSES_M = 1.0        # ... if it runs at least this far along the outline, and further than a wall
-                        # butting on end-first would (its thickness plus TOUCH_M each side)
+TOUCH_M = 0.3           # a wall this close to a room's outline may enclose it, if it runs along the
+                        # outline further than a wall butting on end-first (or touching a corner) would:
+                        # its thickness plus TOUCH_M each side
 
 
-def _encloses(outline, cut) -> bool:
-    """Does a wall's cut run along a room's outline, rather than butt onto it?"""
-    rect = cut.minimum_rotated_rectangle
-    if isinstance(rect, Polygon) and not rect.is_empty:
-        r = rect.exterior.coords
-        thick = min(Point(r[0]).distance(Point(r[1])), Point(r[1]).distance(Point(r[2])))
-    else:                   # a cut with no area (a line or a point) has no thickness
-        thick = 0.0
-    along = outline.intersection(cut.buffer(TOUCH_M)).length
-    return along >= max(ENCLOSES_M, thick + 2 * TOUCH_M + 0.1)
+def _encloses(room, wall: "_Wall") -> bool:
+    """Does a wall run along a room's outline, rather than butt onto it?"""
+    along = room.boundary.intersection(wall.near).length
+    return along >= wall.thick + 2 * TOUCH_M + 0.1
 
 
-def _risk_rooms(f: Facts, plans) -> list[Finding]:
-    """By-law 139: a fire risk room is separated by fire-resisting construction.  Its enclosing walls
-    (those running along its plan outline) are rated at least RISK_AREA_FRP_MIN, and the doors and
-    windows in them at least half an hour.  Floors and ceilings are not judged.  Warnings, since the
-    local authority sets the period and the rooms are found by name."""
+@dataclass(frozen=True)
+class _Enclosed:
+    """A kind of room the by-laws want walled off from the rest of the building: found by name, its
+    enclosing internal walls (those running along its plan outline; an external wall separates it
+    from the outside, not from the building) rated at least `wall_min`, the doors in them at least
+    half an hour, and its windows likewise, or not allowed at all.  A door or window is in a wall
+    when it fills an opening in it, or, unhosted, its outline lies on the wall."""
+    rule: str
+    pattern: re.Pattern
+    what: str
+    clause: str
+    wall_min: int
+    windows_allowed: bool
+    note: str
+
+
+_ENCLOSED = (
+    _Enclosed("GEO-RISK-ROOM", rooms.RISK_ROOM, "fire risk room", "UBBL by-law 139", ubbl.RISK_AREA_FRP_MIN, True,
+              "The local authority sets the period"),
+    _Enclosed("GEO-SHAFT", rooms.SHAFT, "protected shaft", "UBBL by-law 150", ubbl.PROTECTED_SHAFT_FRP_MIN, False,
+              "Openings allowed: pipes, fire doors (lift landing doors included, 150(5)(c)) and ducts; one hour "
+              "is the least period checked"),
+)
+
+
+def _enclosed_rooms(plans) -> list[Finding]:
+    """By-law 139 (fire risk rooms) and 150 (protected shafts): the room is separated by
+    fire-resisting construction.  Voids count (a lift or duct shaft is often drawn as one).  Floors
+    and ceilings are not judged.  Warnings, since the rooms are found by name."""
+    out = []
+    for kind in _ENCLOSED:
+        for pl in plans:
+            for sp in pl.all_spaces:
+                if named(sp, kind.pattern) and (poly := pl.outline(sp)) is not None:
+                    out += _enclosure_findings(pl, sp, poly, kind)
+    return out
+
+
+def _enclosure_findings(pl: Plan, sp, poly, kind: _Enclosed) -> list[Finding]:
+    where = f"{pl.name} {label(sp)}"
+    around = [w for w in pl.walls if _encloses(poly, w)]
+    walls = [w for w in around if not w.external]
+    if not walls:
+        if around:          # walled by external walls only: separated from the outside, not the building
+            return []
+        return [Finding(kind.rule, "warning", f"{where}: {kind.what}, but no wall was found along its outline, "
+                        "so its separation was not checked", kind.clause, [sp.GlobalId])]
+    ids = {w.el.id() for w in walls}
+    on_walls = unary_union([w.near for w in walls])
+    near_room = poly.buffer(TOUCH_M)
+
+    def in_its_walls(o, outline):
+        """In an enclosing wall, and next to the room (a long wall has other rooms' doors too)."""
+        drawn = outline is not None and not outline.is_empty
+        if (h := host_wall(o)) is not None:
+            return h.id() in ids and (not drawn or outline.intersects(near_room))
+        return drawn and outline.intersects(on_walls) and outline.intersects(near_room)
+
+    openings = [o for o, outline in pl.openings if in_its_walls(o, outline)]
+    weak = []
+    for e in [w.el for w in walls] + openings:
+        if e.is_a("IfcWindow") and not kind.windows_allowed:
+            weak.append((e, f"window, not allowed in a {kind.what}"))
+            continue
+        need = kind.wall_min if e.id() in ids else ubbl.FIRE_DOOR_FRP_MIN
+        m = rating(e)
+        if m is None or m < need:
+            weak.append((e, f"{'unrated or unreadable' if m is None else f'{m} min'} (needs {need})"))
+    if not weak:
+        return []
+    what = "; ".join(f"{label(e)} {why}" for e, why in weak[:6]) + (" ..." if len(weak) > 6 else "")
+    return [Finding(kind.rule, "warning", f"{where}: {kind.what} not separated by fire-resisting construction: "
+                    f"{what}. {kind.note}", kind.clause, [sp.GlobalId] + [e.GlobalId for e, _ in weak])]
+
+
+def assembly_capacity(sp, area) -> tuple[int, str] | None:
+    """By-law 180: (persons, how) for a room used for assembly, or None for any other room.  Fixed
+    seats (MY_FireSafety.FixedSeats) count one each; otherwise the net floor area over the factor
+    for the use its name gives."""
+    seats = prop(sp, PSET, "FixedSeats")
+    if seats is not None:
+        return int(seats), f"{int(seats)} fixed seats"
+    if named(sp, rooms.CIRCULATION):
+        return None
+    use = next((u for u, pat in rooms.ASSEMBLY_USE if named(sp, pat)), None)
+    if use is None:
+        return None
+    per = ubbl.ASSEMBLY_LOAD[use]
+    return math.ceil(area / per), f"{area:.0f} m2 at {per:g} m2 a person ({use.replace('_', ' ')} use)"
+
+
+def _assembly_room(f: Facts, sp, poly) -> tuple[int, str] | None:
+    """(persons, how) for a place of assembly (by-law 179: 100 persons or more), else None."""
+    cap = assembly_capacity(sp, f.floor_area(sp) or poly.area)
+    return cap if cap is not None and ubbl.assembly_class(cap[0]) is not None else None
+
+
+def _assembly_rooms(f: Facts, plans) -> list[Finding]:
+    """By-laws 179-183: a room for 100 or more persons used for assembly has the exits its class
+    needs (doors in its walls, 183(d)-(f)), enough exit width at 100 persons a 552 mm unit
+    (181, 183(a)-(b)), and no exit door under 700 mm (181).  The doors are those whose plan
+    outline touches the room, wherever they lead; how remote they are from each other is not judged."""
     out = []
     for pl in plans:
         for sp, poly in pl.spaces:
-            if not named(sp, rooms.RISK_ROOM):
+            if (cap := _assembly_room(f, sp, poly)) is None:
                 continue
-            where = f"{pl.name} {label(sp)}"
-            walls = [w for w, c in pl.walls if _encloses(poly.boundary, c)]
-            if not walls:
-                out.append(Finding("GEO-RISK-ROOM", "warning",
-                                   f"{where}: fire risk room, but no wall was found along its outline, so its "
-                                   "separation was not checked", "UBBL by-law 139", [sp.GlobalId]))
-                continue
-            ids = {w.id() for w in walls}
-            openings = [o for o in pl.openings if (h := host_wall(o)) is not None and h.id() in ids]
-            need = [(w, ubbl.RISK_AREA_FRP_MIN) for w in walls] + [(o, ubbl.FIRE_DOOR_FRP_MIN[0]) for o in openings]
-            weak = [(e, m, n) for e, n in need if (m := rating(e)) is None or m < n]
-            if weak:
-                what = "; ".join(f"{label(e)} {'unrated or unreadable' if m is None else f'{m} min'}"
-                                 f" (needs {need})" for e, m, need in weak[:6]) + (" ..." if len(weak) > 6 else "")
-                out.append(Finding("GEO-RISK-ROOM", "warning",
-                                   f"{where}: fire risk room not separated by fire-resisting construction: {what}. "
-                                   "The local authority sets the period", "UBBL by-law 139",
-                                   [sp.GlobalId] + [e.GlobalId for e, _, _ in weak]))
+            persons, how = cap
+            cls, need = ubbl.assembly_class(persons), ubbl.assembly_exits(persons)
+            where = f"{pl.name} {label(sp)}: class {cls} place of assembly for {persons} persons ({how})"
+            doors = [d for d, _ in pl.room_doors(poly)]
+            widths = [(d, d.OverallWidth * f.scale * 1000 if d.OverallWidth else None) for d in doors]
+            units = sum(ubbl.assembly_units(w) for _, w in widths if w is not None)
+            narrow = [d for d, w in widths if w is not None and w < ubbl.ASSEMBLY_MIN_DOOR_MM]
+            unknown = [d for d, w in widths if w is None]
+            gids = [sp.GlobalId] + [d.GlobalId for d in doors]
+            detail = {"persons": persons, "class": cls, "exits": len(doors), "exits_needed": need, "units": units}
+            if len(doors) < need:
+                out.append(Finding("GEO-ASSEMBLY-EXITS", "error", f"{where} has {len(doors)} exit(s); "
+                                   f"class {cls} needs at least {need}", "UBBL by-law 179, 183(d)-(f)", gids, detail))
+            if units * ubbl.ASSEMBLY_PERSONS_PER_UNIT < persons:
+                out.append(Finding("GEO-ASSEMBLY-WIDTH", "warning" if unknown else "error",
+                                   f"{where}: its doors give {units:g} units of 552 mm, enough for "
+                                   f"{units * ubbl.ASSEMBLY_PERSONS_PER_UNIT:.0f}"
+                                   + (f" (no width given for {', '.join(label(d) for d in unknown)})" if unknown else ""),
+                                   "UBBL by-law 181, 183(a)-(b)", gids, detail))
+            if narrow:
+                out.append(Finding("GEO-ASSEMBLY-WIDTH", "error",
+                                   f"{where}: exit door(s) {', '.join(label(d) for d in narrow)} narrower than "
+                                   f"{ubbl.ASSEMBLY_MIN_DOOR_MM} mm", "UBBL by-law 181", [d.GlobalId for d in narrow]))
     return out
 
 
@@ -434,12 +550,11 @@ def check(model: ifcopenshell.file, heat_dir: str | None = None, cell: float = 0
     """heat_dir: write a travel-distance PNG per storey there, and record each in `heatmaps`
     (storey name -> path) when given."""
     f = Facts(model)
-    out = []
+    pls = plans(f)
+    out = _enclosed_rooms(pls) + _assembly_rooms(f, pls)
     if f.group in ubbl.PURPOSE_GROUPS:
-        pls = plans(f)
         out += _travel(f, pls, heat_dir, cell, {} if heatmaps is None else heatmaps)
         out += _exit_spacing(f, pls)
-        out += _risk_rooms(f, pls)
     out += _access(f)
     out += _groups(f)
     out += _basement(f)

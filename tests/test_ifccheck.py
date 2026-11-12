@@ -483,3 +483,39 @@ def test_ifc2x3_user_defined_type():
     fi = m.create_entity("IfcFlowTerminal", GlobalId=guid.new(), Name="FI1")
     m.create_entity("IfcRelDefinesByType", GlobalId=guid.new(), RelatedObjects=[fi], RelatingType=t)
     assert model.objects(m, "IfcFireSuppressionTerminal", ("FOAMINLET",)) == [fi]
+
+
+@pytest.mark.parametrize("basement, windows, vent, warned", [
+    ("Car Park", True, None, True),
+    ("Car Park", True, "Smoke Extract Fan SEF-1", False),
+    ("Car Park", True, "Pelega Asap 2", False),
+    ("Car Park", True, "Smoke & Heat Vent SHV-1", False),
+    ("Car Park", True, "type:AOV roof vent", False),         # named on its type object only
+    ("Car Park", True, "Exhaust Fan EF-1", True),            # an ordinary fan is not a smoke vent
+    ("Car Park", True, "Peti Sef", True),                    # a safe
+    ("Open to below", True, None, False),                    # a void below ground is not an underground storey
+    (None, True, None, False),
+    (None, False, None, True),                               # windowless
+    (None, False, "Smoke Vent", False),
+])
+def test_smoke_venting(write, basement, windows, vent, warned):
+    import ifcopenshell.api.root as root
+    import ifcopenshell.api.spatial as spatial
+    import ifcopenshell.api.type as typ
+    m = _basement_boiler(room=basement)[0] if basement else ifcmodel.office(storeys=2)
+    if not windows:
+        for w in m.by_type("IfcWindow"):
+            m.remove(w)
+    if vent:
+        on_type = vent.startswith("type:")
+        fan = root.create_entity(m, ifc_class="IfcFan", name="F1" if on_type else vent)
+        if on_type:
+            t = root.create_entity(m, ifc_class="IfcFanType", name=vent[5:])
+            typ.assign_type(m, related_objects=[fan], relating_type=t)
+        spatial.assign_container(m, products=[fan], relating_structure=m.by_type("IfcBuildingStorey")[0])
+    fs = [x for x in ifccheck.check(write(m)) if x.rule == "IFC-SMOKE-VENT"]
+    assert bool(fs) is warned, [x.message for x in fs]
+    if warned:
+        assert fs[0].clause == "UBBL by-law 249" and ("underground" in fs[0].message) is bool(basement)
+        if basement:
+            assert fs[0].where == [s.GlobalId for s in m.by_type("IfcBuildingStorey") if s.Name == "B1"]

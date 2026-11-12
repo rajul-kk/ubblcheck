@@ -226,6 +226,42 @@ def access_perimeter_share(volume_m3: float) -> float:
     return share
 
 
+# By-laws 179-183 and 188, places of assembly.
+ASSEMBLY_LOAD = {"concentrated": 0.65, "less_concentrated": 1.35, "standing": 3.0}   # 180: m2 net per person
+ASSEMBLY_CLASSES = (("A", 1000), ("B", 300), ("C", 100))                         # 179: capacity at least
+ASSEMBLY_UNIT_MM = 552          # 181: unit of exit width
+ASSEMBLY_HALF_UNIT_MM = 300     # 181: 300 mm over one or more full units counts as half a unit
+ASSEMBLY_MIN_DOOR_MM = 700      # 181: no individual access to exit narrower
+ASSEMBLY_PERSONS_PER_UNIT = 100  # 183(a), (b)
+ASSEMBLY_TRAVEL_M = (45, 60)    # 188: unsprinklered, sprinklered
+
+
+def assembly_class(capacity: int) -> str | None:
+    """By-law 179: class A, B or C of a place of assembly, or None under 100 persons."""
+    return next((c for c, least in ASSEMBLY_CLASSES if capacity >= least), None)
+
+
+def assembly_exits(capacity: int) -> int:
+    """By-law 183(d)-(f): separate exits a place of assembly needs (0 under 100 persons)."""
+    cls = assembly_class(capacity)
+    return {"A": 4, "B": 3 if capacity > 600 else 2, "C": 2}.get(cls, 0)
+
+
+def assembly_travel(lim: "TravelLimit", sprinklered: bool) -> "TravelLimit":
+    """By-law 188: travel in a place of assembly is at most 45 m, 60 m sprinklered, where the
+    building's own limit (`lim`) is looser."""
+    m = ASSEMBLY_TRAVEL_M[1 if sprinklered else 0]
+    if lim.travel_m is not None and lim.travel_m <= m:
+        return lim
+    return TravelLimit(m, lim.dead_end_m, "UBBL by-law 188")
+
+
+def assembly_units(width_mm: float) -> float:
+    """By-law 181: units of 552 mm exit width in an opening; 300 mm over a full unit is half a unit."""
+    full, rest = divmod(width_mm, ASSEMBLY_UNIT_MM)
+    return full + (0.5 if full >= 1 and rest >= ASSEMBLY_HALF_UNIT_MM else 0.0)
+
+
 # Other numeric thresholds used by checks.
 COMPARTMENT_FLOOR_HEIGHT_M = 30     # by-law 137
 COMPARTMENT_FLOOR_ABOVE_M = 9       # by-law 137
@@ -236,10 +272,11 @@ ROOM_PERSONS = 6                    # by-law 165(3): rooms for this many or fewe
 HYDRANT_DISTANCE_M = 91.5           # by-law 225(2): a hydrant this close to fire brigade access
 RISER_HEIGHT_M = 18.3               # by-law 229(1): above this topmost floor, a rising system and a fire lift
 WET_RISER_HEIGHT_M = 30.5           # by-law 231: above this, the rising system is wet
-FIRE_DOOR_FRP_MIN = (30, 60, 120, 240)  # minutes, by-law 162-163 and Ninth Schedule
+FIRE_DOOR_FRP_MIN = 30   # minutes: a fire door (by-law 162) resists fire half an hour at least
 MIN_EXITS = 2                        # by-law 177(d)
 COMMAND_CENTRE_HEIGHT_M = 30.5      # by-law 238: buildings over this height have a command and control centre
 FIRE_LOBBY_MIN_M2 = 5.57             # by-law 242(a): floor area of each fire-fighting access lobby
+PROTECTED_SHAFT_FRP_MIN = 60         # by-law 150(3): protecting structures of an hour or more; 1 hour is the floor used here
 RISK_AREA_FRP_MIN = 60               # by-law 139: the local authority sets the period; 1 hour is the floor used here
 EXIT_SPACING_M = 5                   # by-law 174(1): between the nearest edges of the openings
 SINGLE_STAIR_TOP_M = 12              # by-law 194: topmost floor at most this high

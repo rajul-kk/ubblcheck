@@ -80,6 +80,7 @@ def office(storeys=2, space_area=400.0, comp_split=True, travel=40.0, exit_width
                                       predefined_type="ELEVATOR")
             _ps(m, lift, "Pset_TransportElementElevator", {"FireFightingLift": True})
             items.append(lift)
+        items.append(root.create_entity(m, ifc_class="IfcWindow", name=f"W{i}"))   # not windowless (by-law 249)
         spatial.assign_container(m, products=items, relating_structure=st)
     if roof:
         # a roof level exported as a storey: a roof slab and no spaces

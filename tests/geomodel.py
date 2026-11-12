@@ -83,26 +83,47 @@ class Model:
         geo.edit_object_placement(self.m, product=w, matrix=_mat(x1, y1, z, ang))
         _ps(self.m, w, "Pset_WallCommon", {"Compartmentation": False})
         self._contain(w, st)
-        self.ends[w.id()] = (a, b, ang)
+        self.ends[w.id()] = (a, b, ang, thickness, z)
         return w
 
-    def door(self, st, wall, at, width=1.0, exit=False, z=0.0, name="D"):
-        """Door centred `at` metres along `wall` from its start."""
-        (x1, y1), _, ang = self.ends[wall.id()]
+    def door(self, st, wall, at, width=1.0, exit=False, z=0.0, name="D", hosted=True):
+        """Door centred `at` metres along `wall` from its start; unhosted, it has a body of its own
+        and fills no opening (as some exporters write it)."""
+        (x1, y1), _, ang, _, _ = self.ends[wall.id()]
         s = at - width / 2
         x, y = x1 + s * math.cos(ang), y1 + s * math.sin(ang)
         op = root.create_entity(self.m, ifc_class="IfcOpeningElement", name=name + "-op")
         geo.assign_representation(self.m, product=op, representation=geo.add_wall_representation(
             self.m, context=self.body, length=width, height=2.1, thickness=T + 0.4, offset=-(T + 0.4) / 2))
         geo.edit_object_placement(self.m, product=op, matrix=_mat(x, y, z, ang))
-        feat.add_feature(self.m, feature=op, element=wall)
         d = root.create_entity(self.m, ifc_class="IfcDoor", name=name)
         d.OverallWidth = width
         geo.edit_object_placement(self.m, product=d, matrix=_mat(x, y, z, ang))
-        feat.add_filling(self.m, opening=op, element=d)
+        if hosted:
+            feat.add_feature(self.m, feature=op, element=wall)
+            feat.add_filling(self.m, opening=op, element=d)
+        else:
+            self.m.remove(op)
+            geo.assign_representation(self.m, product=d, representation=geo.add_wall_representation(
+                self.m, context=self.body, length=width, height=2.1, thickness=0.05, offset=-0.025))
         _ps(self.m, d, "Pset_DoorCommon", {"FireExit": exit, "FireRating": "60"})
         self._contain(d, st)
         return d
+
+    def window(self, st, wall, at, name="W"):
+        """A 1 m window centred `at` metres along `wall`, filling an opening in it (no body of its own)."""
+        (x1, y1), _, ang, thick, z = self.ends[wall.id()]
+        x, y = x1 + (at - 0.5) * math.cos(ang), y1 + (at - 0.5) * math.sin(ang)
+        op = root.create_entity(self.m, ifc_class="IfcOpeningElement", name=name + "-op")
+        geo.assign_representation(self.m, product=op, representation=geo.add_wall_representation(
+            self.m, context=self.body, length=1.0, height=1.2, thickness=thick + 0.4, offset=-(thick + 0.4) / 2))
+        geo.edit_object_placement(self.m, product=op, matrix=_mat(x, y, z + 0.9, ang))
+        feat.add_feature(self.m, feature=op, element=wall)
+        w = root.create_entity(self.m, ifc_class="IfcWindow", name=name)
+        feat.add_filling(self.m, opening=op, element=w)
+        _ps(self.m, w, "Pset_WindowCommon", {"FireRating": "60"})
+        self._contain(w, st)
+        return w
 
     def space(self, st, pts, z, name, compartment="C1", height=3.0, travel=None, long_name=None):
         sp = root.create_entity(self.m, ifc_class="IfcSpace", name=name)
