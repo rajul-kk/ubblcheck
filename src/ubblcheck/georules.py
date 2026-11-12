@@ -26,7 +26,8 @@ from shapely.ops import unary_union
 
 from . import geom, travel, ubbl
 from .findings import Finding
-from .ifccheck import _FLOOR_SLABS, PSET, Facts, _prop, exits_declared, not_floor, objects, storey_exits
+from .ifccheck import (_FLOOR_SLABS, PSET, Facts, _prop, exits_declared, not_floor, objects, space_labels,
+                       storey_exits)
 
 ABUT_M = 10.0          # assumption: a face "abuts" access within this distance (not in UBBL)
 ACCESS_WIDTH_M = ubbl.ACCESS_ROAD_MIN_M
@@ -50,8 +51,7 @@ ANCILLARY = re.compile(r"toilet|tandas|wc|lobby|lobi|corridor|koridor|hallway|(e
 
 
 def use_group(space) -> str | None:
-    label = " ".join(str(x) for x in (space.Name, getattr(space, "LongName", None),
-                                      getattr(space, "ObjectType", None)) if x)
+    label = " ".join(space_labels(space))
     if not label or ANCILLARY.search(label):
         return None
     for g, pat in USE_WORDS:

@@ -101,12 +101,21 @@ _VOID = re.compile(r"open to below|\bvoid\b|terbuka ke bawah|double (height|volu
                    r"|^\s*(roof|attic)( space)?\s*$|\b(roof|ceiling) space\b", re.I)
 
 
+def space_labels(space) -> list[str]:
+    """What a space is called: its Name, LongName and ObjectType (room type), where given."""
+    return [str(x) for x in (space.Name, getattr(space, "LongName", None), getattr(space, "ObjectType", None)) if x]
+
+
+def named(space, pattern) -> bool:
+    return any(pattern.search(x) for x in space_labels(space))
+
+
 def not_floor(space) -> bool:
     """A space that is not floor area: a void or double-height volume drawn as a room, or a gross-area
     zone (IfcSpace GFA, as Revit exports area plans) that would count the rooms inside it twice."""
     if (getattr(space, "PredefinedType", None) or "") == "GFA":
         return True
-    return any(_VOID.search(x) for x in (space.Name, getattr(space, "LongName", None)) if x)
+    return named(space, _VOID)
 
 
 def exits_declared(f: "Facts") -> bool:
@@ -246,6 +255,7 @@ def check_rules(model: ifcopenshell.file) -> list[Finding]:
     out += _ninth(f, height)
     out += _systems(f)
     out += _tenth(f, height)
+    out += _tall_building_rooms(f, height)
     return out
 
 
@@ -696,24 +706,71 @@ def _fire_doors(f: Facts):
 
 
 def _door_closers(f: Facts):
-    """By-law 164(1): every fire door (a door with a fire rating of half an hour or more) is
-    self-closing.  Declared False is an error; undeclared doors are listed in one warning."""
+    """Fire doors (rated half an hour or more, by-law 164(1)) and exit doors (by-law 173(2)) close by
+    themselves.  Declared not self-closing is an error; doors that don't say are listed in one warning."""
     out, unknown = [], []
     for d in f.model.by_type("IfcDoor"):
         r = frp_minutes(_prop(d, "Pset_DoorCommon", "FireRating"))
-        if r is None or r < 30:
+        why = [w for w, applies in (("fire door", r is not None and r >= 30),
+                                    ("exit door", _prop(d, "Pset_DoorCommon", "FireExit") is True)) if applies]
+        if not why:
             continue
         closing = _prop(d, "Pset_DoorCommon", "SelfClosing")
         if closing is False:
             out.append(Finding("IFC-DOORCLOSER", "error",
-                               f"Fire door {d.Name or d.GlobalId} ({r} min) is declared not self-closing",
-                               "UBBL by-law 164(1)", [d.GlobalId]))
+                               f"Door {d.Name or d.GlobalId} ({' and '.join(why)}) is declared not self-closing",
+                               _closer_clause(why), [d.GlobalId]))
         elif closing is None:
-            unknown.append(d)
+            unknown.append((d, why))
     if unknown:
+        kinds = sorted({w for _, why in unknown for w in why})
         out.append(Finding("IFC-DOORCLOSER-DATA", "warning",
-                           f"{len(unknown)} fire door(s) don't say whether they are self-closing "
-                           "(Pset_DoorCommon.SelfClosing)", "UBBL by-law 164(1)", [d.GlobalId for d in unknown]))
+                           f"{len(unknown)} {' or '.join(kinds)}(s) don't say whether they are self-closing "
+                           "(Pset_DoorCommon.SelfClosing)", _closer_clause(kinds), [d.GlobalId for d, _ in unknown]))
+    return out
+
+
+def _closer_clause(why) -> str:
+    return "UBBL by-law " + ", ".join(c for w, c in (("fire door", "164(1)"), ("exit door", "173(2)")) if w in why)
+
+
+# by-law 238: the fire command centre, not any control room (CCTV, security, lift)
+_COMMAND_CENTRE = re.compile(r"command\s*(and|&)\s*control|fire\s+(command|control)\b|\bFCC\b"
+                             r"|(bilik|pusat)\s+(kawalan|arahan)\s+(bomba|kebakaran)", re.I)
+# by-law 242: a lobby, and a fire-fighting word ('FFL' is finished floor level on drawings, so not used)
+_LOBBY = re.compile(r"\blobb(y|ies)\b|\blobi\b", re.I)
+_FIRE_FIGHTING = re.compile(r"fire\s*-?\s*fight|fire\s*m[ae]n|\bbomba\b", re.I)
+
+
+def _fire_lobby(space) -> bool:
+    return any(_LOBBY.search(x) and _FIRE_FIGHTING.search(x) for x in space_labels(space))
+
+
+def _tall_building_rooms(f: Facts, height) -> list[Finding]:
+    """Rooms found by name.  By-law 238: over 30.5 m, a command and control centre.  By-law 242(a):
+    each fire-fighting access lobby at least 5.57 m2.  A missing room is a warning, since the
+    checker only knows rooms by their names."""
+    out = []
+    spaces = f.model.by_type("IfcSpace")
+    if height > ubbl.COMMAND_CENTRE_HEIGHT_M and not any(named(sp, _COMMAND_CENTRE) for sp in spaces):
+        out.append(Finding("IFC-COMMAND-CENTRE", "warning",
+                           f"Building is {height:.1f} m high (over {ubbl.COMMAND_CENTRE_HEIGHT_M} m) and no space is "
+                           "named as a command and control centre (e.g. 'Fire Command Centre', 'Bilik Kawalan Bomba')",
+                           "UBBL by-law 238", [f.building.GlobalId] if f.building else []))
+    for sp in spaces:
+        if not _fire_lobby(sp):
+            continue
+        a = f.floor_area(sp)
+        if a <= 0:
+            out.append(Finding("IFC-FIRE-LOBBY-DATA", "warning",
+                               f"Fire-fighting access lobby {sp.LongName or sp.Name or sp.GlobalId} has no floor area "
+                               "the checker can read; its 5.57 m2 minimum was not checked", "UBBL by-law 242(a)",
+                               [sp.GlobalId]))
+        elif a < ubbl.FIRE_LOBBY_MIN_M2:
+            out.append(Finding("IFC-FIRE-LOBBY", "error",
+                               f"Fire-fighting access lobby {sp.LongName or sp.Name or sp.GlobalId}: {a:.2f} m2, "
+                               f"under the {ubbl.FIRE_LOBBY_MIN_M2} m2 minimum", "UBBL by-law 242(a)",
+                               [sp.GlobalId], {"area_m2": a}))
     return out
 
 
