@@ -59,6 +59,7 @@ A result above the limit but inside that tolerance is reported as a
 | GEO-NOROUTE | More than 5 % of a space has no route to any exit (missing door, or a door not cut into its wall) |
 | GEO-NOEXIT | An occupied storey with no exit: no fire exit door, and no escape stair coming up to it. A storey with no exit door is measured to its escape stairs, the same exits IFC-EXIT-COUNT counts |
 | GEO-EXIT-GEOM | A storey's exits have no plan geometry (warning: travel not measured) |
+| GEO-RISK-ROOM | A fire risk room (boiler, laundry, linen, LPG, genset, transformer, substation, by name) has an enclosing wall under 60 min, or a door or window in one under 30 min; or no enclosing wall was found (by-law 139, warning). A wall encloses the room when it runs at least 1 m along the room's outline |
 | GEO-EXIT-SPACING | No two of a storey's exit doors are 5 m apart, edge to edge (by-law 174(1)); skipped where by-law 194 allows one exit |
 | GEO-DECLARED | `MaxTravelDistance` in the model is shorter than the measured distance |
 | GEO-AREA | Declared floor area differs from the space geometry by more than 5 % |

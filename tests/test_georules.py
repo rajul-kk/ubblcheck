@@ -243,3 +243,49 @@ def test_exit_without_plan_geometry_is_a_warning():
     fs = georules.check(md.m)
     assert [x.rule for x in fs if x.rule.startswith(("GEO-NOEXIT", "GEO-EXIT-GEOM"))] == ["GEO-EXIT-GEOM"]
     assert next(x for x in fs if x.rule == "GEO-EXIT-GEOM").where == [stair.GlobalId]
+
+
+def _risk_floor(door="60", wall_ratings=("120",) * 4, own_walls=True, partition=False):
+    """A shop floor with a 4 x 4 m boiler room in the middle, walled and doored as given."""
+    import ifcopenshell.api.pset as pset
+    import ifcopenshell.util.element as ue
+
+    def rate(e, ps, r):
+        pset.edit_pset(md.m, pset=md.m.by_id(ue.get_psets(e)[ps]["id"]), properties={"FireRating": r or ""})
+
+    md, st = one_storey(20, 10, ((0, 2.0), (0, 18.0)), group="V")
+    named = {}
+    if own_walls:
+        corners = [(8, 3), (12, 3), (12, 7), (8, 7)]
+        walls = [md.wall(st, corners[i], corners[(i + 1) % 4], 0.0, name=f"BR-W{i}") for i in range(4)]
+        for w, r in zip(walls, wall_ratings):
+            rate(w, "Pset_WallCommon", r)
+        named["door"] = md.door(st, walls[0], 2.0, name="BR-D")
+        rate(named["door"], "Pset_DoorCommon", door)
+        named["walls"] = walls
+    if partition:       # an unrated corridor partition butting against the room's east wall
+        named["partition"] = md.wall(st, (12.1, 5.0), (16.0, 5.0), 0.0, name="P1")
+    named["room"] = md.space(st, G.rect(8.1, 3.1, 11.9, 6.9), 0.0, "B01", long_name="Boiler Room")
+    return [x for x in georules.check(md.m) if x.rule == "GEO-RISK-ROOM"], named
+
+
+def test_risk_room_walled_off_passes():
+    fs, _ = _risk_floor()
+    assert fs == []
+    fs, _ = _risk_floor(door="FD60")                    # the usual door mark is read as 60 min
+    assert fs == []
+    fs, _ = _risk_floor(partition=True)                 # a partition butting on is not an enclosing wall
+    assert fs == []
+
+
+def test_risk_room_with_weak_door_or_wall():
+    fs, n = _risk_floor(door=None)
+    assert [x.where for x in fs] == [[n["room"].GlobalId, n["door"].GlobalId]]
+    assert "unrated or unreadable" in fs[0].message and fs[0].clause == "UBBL by-law 139"
+    fs, n = _risk_floor(wall_ratings=("120", "30", "120", "120"))
+    assert [x.where for x in fs] == [[n["room"].GlobalId, n["walls"][1].GlobalId]] and "30 min (needs 60)" in fs[0].message
+
+
+def test_risk_room_with_no_walls_is_reported():
+    fs, n = _risk_floor(own_walls=False)
+    assert len(fs) == 1 and "no wall was found" in fs[0].message and fs[0].where == [n["room"].GlobalId]

@@ -21,7 +21,7 @@ needs a drawing checklist item to cite it. A by-law the code cites can't be mark
 | 136 | Compartment size limits (Fifth Schedule) | checked | shown | IFC-COMP-AREA, IFC-COMP-VOL, sprinkler doubling |
 | 137 | Compartment floors over 30 m | checked | — | IFC-COMP-FLOOR |
 | 138 | Other compartment walls and floors | checked | — | (c) mixed purpose groups and (d) floor over a basement only |
-| 139 | Separation of fire risk areas | — | — | Possible: needs rooms tagged as risk areas (boiler, transformer, genset) |
+| 139 | Separation of fire risk areas | checked | — | Risk rooms found by name (boiler, laundry, linen, LPG, genset, transformer, substation; English and Malay): the walls along the room's outline at least 60 min, the doors and windows in them at least 30 (GEO-RISK-ROOM, warning: the local authority sets the period). Floors and ceilings are not judged |
 | 140 | Fire appliance access | checked | shown | GEO-ACCESS, GEO-ACCESS-WIDTH; drawings: access in yellow (PDF-YELLOW) and the calculation (PG3) |
 | 141 | Separating walls | — | — | Needs the adjoining building, which isn't in the model |
 | 142 | External walls | — | — | Needs the relevant boundary and unprotected areas (Sixth Schedule) |

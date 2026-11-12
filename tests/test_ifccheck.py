@@ -406,3 +406,15 @@ def test_room_names(name, centre, lobby):
     sp = ifcopenshell.file(schema="IFC4").createIfcSpace(Name="01", ObjectType=name)   # a Revit room type
     assert ifccheck.named(sp, ifccheck._COMMAND_CENTRE) is centre
     assert ifccheck._fire_lobby(sp) is lobby
+
+
+@pytest.mark.parametrize("label", ["60", "FRP 60 min", "REI 120", "FD60", "FD 30", "FRD60", "120 minutes", "1 HR",
+                                   "2 HR FRP", "1/2 hour", "1.5 hrs", "FD", "60 FRP", "one hour", "45", ""])
+def test_rating_parser_and_ids_pattern_agree(label):
+    """ids_build.FRP_PATTERN and ifccheck.frp_minutes are two readings of one convention."""
+    import re
+    in_ids = re.fullmatch(ids_build.FRP_PATTERN, label) is not None
+    read = ifccheck.frp_minutes(label)
+    assert in_ids <= (read is not None), label            # whatever the IDS accepts, the checker reads
+    if read is not None and read in (30, 60, 90, 120, 180, 240):
+        assert in_ids, label                              # and the standard periods it reads, the IDS accepts

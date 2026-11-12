@@ -237,6 +237,7 @@ FIRE_DOOR_FRP_MIN = (30, 60, 120, 240)  # minutes, by-law 162-163 and Ninth Sche
 MIN_EXITS = 2                        # by-law 177(d)
 COMMAND_CENTRE_HEIGHT_M = 30.5      # by-law 238: buildings over this height have a command and control centre
 FIRE_LOBBY_MIN_M2 = 5.57             # by-law 242(a): floor area of each fire-fighting access lobby
+RISK_AREA_FRP_MIN = 60               # by-law 139: the local authority sets the period; 1 hour is the floor used here
 EXIT_SPACING_M = 5                   # by-law 174(1): between the nearest edges of the openings
 SINGLE_STAIR_TOP_M = 12              # by-law 194: topmost floor at most this high
 SINGLE_STAIR_CONDITIONS = (

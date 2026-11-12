@@ -26,8 +26,8 @@ from shapely.ops import unary_union
 
 from . import geom, travel, ubbl
 from .findings import Finding
-from .ifccheck import (_FLOOR_SLABS, PSET, Facts, _prop, exits_declared, not_floor, objects, space_labels,
-                       storey_exits)
+from .ifccheck import (_FLOOR_SLABS, PSET, Facts, _prop, exits_declared, frp_minutes, host_wall, named, not_floor,
+                       objects, space_labels, storey_exits)
 
 ABUT_M = 10.0          # assumption: a face "abuts" access within this distance (not in UBBL)
 ACCESS_WIDTH_M = ubbl.ACCESS_ROAD_MIN_M
@@ -83,8 +83,11 @@ class Plan:
             fp = geom.footprint(geom.mesh(sp))
             if fp is not None and fp.area > 0.05:
                 self.spaces.append((sp, fp))
-        self.obstacles = [geom.section(geom.mesh(e), cut) for t in ("IfcWall", "IfcColumn", "IfcCurtainWall")
-                          for e in by_storey[t]]
+        cuts = [(e, geom.section(geom.mesh(e), cut)) for t in ("IfcWall", "IfcColumn", "IfcCurtainWall")
+                for e in by_storey[t]]
+        self.walls = [(e, c) for e, c in cuts if c is not None and not e.is_a("IfcColumn")]   # walls, curtain walls
+        self.windows = list(by_storey["IfcWindow"])
+        self.obstacles = [c for _, c in cuts]
         self.doors = []
         for d in by_storey["IfcDoor"]:
             o = geom.door_outline(d)
@@ -121,7 +124,7 @@ class Plan:
 
 def _by_storey(f: Facts):
     out = defaultdict(lambda: defaultdict(list))
-    for t in ("IfcSpace", "IfcWall", "IfcColumn", "IfcCurtainWall", "IfcDoor"):
+    for t in ("IfcSpace", "IfcWall", "IfcColumn", "IfcCurtainWall", "IfcDoor", "IfcWindow"):
         for e in f.model.by_type(t):
             st = f.storey_of(e)
             if st is not None:
@@ -188,6 +191,56 @@ def _exit_spacing(f: Facts, plans) -> list[Finding]:
                                f"{pl.name}: the {len(doors)} exit doors are at most {widest:.1f} m apart; "
                                f"two of them must be at least {ubbl.EXIT_SPACING_M} m apart",
                                "UBBL by-law 174(1)", [d.GlobalId for d, _ in doors], {"widest_m": widest}))
+    return out
+
+
+# by-law 139(a)-(f), and the plant rooms Bomba treats the same way, in English and Malay
+_RISK_ROOM = re.compile(r"boiler|laundr|linen|\bLPG\b|gas (store|storage|room)|gen-?set|generator room|transformer"
+                        r"|substation|hazardous|\bdobi\b|dandang|janakuasa|pengubah|pencawang|bilik (linen|gas|genset)",
+                        re.I)
+TOUCH_M = 0.3           # a wall this close to a room's outline may enclose it ...
+ENCLOSES_M = 1.0        # ... if it runs at least this far along the outline (a partition butting on is shorter)
+_PSET = {"IfcWall": "Pset_WallCommon", "IfcCurtainWall": "Pset_CurtainWallCommon", "IfcDoor": "Pset_DoorCommon",
+         "IfcWindow": "Pset_WindowCommon"}
+
+
+def _risk_rooms(f: Facts, plans) -> list[Finding]:
+    """By-law 139: a fire risk room is separated by fire-resisting construction.  Its enclosing walls
+    (those running along its plan outline) are rated at least RISK_AREA_FRP_MIN, and the doors and
+    windows in them at least half an hour.  Floors and ceilings are not judged.  Warnings, since the
+    local authority sets the period and the rooms are found by name."""
+    out = []
+    for pl in plans:
+        rating = {}
+
+        def minutes(e):
+            if e.id() not in rating:
+                rating[e.id()] = frp_minutes(_prop(e, _PSET.get(e.is_a(), ""), "FireRating"))
+            return rating[e.id()]
+
+        for sp, poly in pl.spaces:
+            if not named(sp, _RISK_ROOM):
+                continue
+            label = f"{pl.name} {sp.LongName or sp.Name or sp.GlobalId}"
+            walls = [w for w, c in pl.walls if poly.boundary.intersection(c.buffer(TOUCH_M)).length >= ENCLOSES_M]
+            if not walls:
+                out.append(Finding("GEO-RISK-ROOM", "warning",
+                                   f"{label}: fire risk room, but no wall was found along its outline, so its "
+                                   "separation was not checked", "UBBL by-law 139", [sp.GlobalId]))
+                continue
+            ids = {w.id() for w in walls}
+            openings = [o for o in [d for d, _ in pl.doors] + pl.windows
+                        if (h := host_wall(o)) is not None and h.id() in ids]
+            weak = [(e, minutes(e), need) for e, need in [(w, ubbl.RISK_AREA_FRP_MIN) for w in walls]
+                    + [(o, ubbl.FIRE_DOOR_FRP_MIN[0]) for o in openings]
+                    if minutes(e) is None or minutes(e) < need]
+            if weak:
+                what = "; ".join(f"{e.Name or e.GlobalId} {'unrated or unreadable' if m is None else f'{m} min'}"
+                                 f" (needs {need})" for e, m, need in weak[:6]) + (" ..." if len(weak) > 6 else "")
+                out.append(Finding("GEO-RISK-ROOM", "warning",
+                                   f"{label}: fire risk room not separated by fire-resisting construction: {what}. "
+                                   "The local authority sets the period", "UBBL by-law 139",
+                                   [sp.GlobalId] + [e.GlobalId for e, _, _ in weak]))
     return out
 
 
@@ -399,6 +452,7 @@ def check(model: ifcopenshell.file, heat_dir: str | None = None, cell: float = 0
         plans = [Plan(f, s, bys[s.id()], exits.get(s, ([], False))) for s in f.storeys]
         out += _travel(f, plans, heat_dir, cell)
         out += _exit_spacing(f, plans)
+        out += _risk_rooms(f, plans)
     out += _access(f)
     out += _groups(f)
     out += _basement(f)

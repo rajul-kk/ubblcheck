@@ -56,7 +56,7 @@ Data with no IFC home goes in the custom set `MY_FireSafety`.
 | Smoke / heat detector | `IfcSensor` SMOKESENSOR / HEATSENSOR | by-law 225, Tenth Schedule |
 
 `FireRating` is a free label in IFC. The pack accepts minutes (`60`,
-`FRP 60 min`) or hours (`1 HR`, `1/2 hour`).
+`FRP 60 min`, door marks like `FD60`) or hours (`1 HR`, `1/2 hour`, `2 HR FRP`).
 
 The **tags** on active objects (`H1`, `BI1`, `HR3`) should match the tags
 on the 2D drawings. The PDF checker uses the same tags to compare the
