@@ -70,6 +70,7 @@ passive and active sets.
 | IFC-TRAVEL, IFC-DEADEND | Declared distances against the Seventh Schedule | by-law 165(4) |
 | IFC-EXIT-COUNT | At least two exits on every occupied storey: exit doors, or, on a storey with none, escape stairs coming up from the storey below | by-law 167, 177(d) |
 | IFC-EXIT-SINGLE | One exit, in a domestic or office building whose topmost floor is at most 12 m: a warning listing the by-law 194 conditions, not an error | by-law 194 |
+| IFC-OCCUPANCY | A space's OccupancyUse names a Seventh Schedule row for the building's group; otherwise its occupants can't be counted | by-law 175 |
 | IFC-EXIT-WIDTH | Occupant load against units of 550 mm exit width | by-law 175–176 |
 | IFC-COMP-FLOOR | In buildings over 30 m, floors more than 9 m up are compartment floors | by-law 137 |
 | IFC-FIREDOOR | A door in a compartment wall has an FRP of at least 30 min, and is warned if weaker than the wall | by-law 162 |

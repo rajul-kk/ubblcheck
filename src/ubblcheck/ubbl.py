@@ -178,9 +178,16 @@ EXIT_KINDS = ("door", "horizontal", "ramp_main", "ramp_secondary", "escalator", 
 UNIT_WIDTH_MM = 550
 
 
-def occupant_load(area_m2: float, group: str, use: str | None = None) -> int:
+def load_row(group: str | None, use: str | None = None) -> str | None:
+    """The Seventh Schedule occupant-load row for a use in a group ('classroom', or 'II.classroom'),
+    or the group's own row when no use is given.  None when there is no such row."""
     key = use if use in OCCUPANT_LOAD else (f"{group}.{use}" if use else DEFAULT_LOAD_USE.get(group))
-    if key not in OCCUPANT_LOAD:
+    return key if key in OCCUPANT_LOAD else None
+
+
+def occupant_load(area_m2: float, group: str, use: str | None = None) -> int:
+    key = load_row(group, use)
+    if key is None:
         raise KeyError(f"no occupant load factor for {group}/{use}")
     per, _ = OCCUPANT_LOAD[key]
     return math.ceil(area_m2 / per)

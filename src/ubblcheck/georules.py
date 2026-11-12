@@ -149,10 +149,8 @@ def _travel(f: Facts, plans, heat_dir, cell):
 
 def _small_room(f: Facts, sp, area) -> bool:
     """A room for ROOM_PERSONS or fewer, which by-law 165(3) measures from its door."""
-    try:
-        return ubbl.occupant_load(area, f.group, _prop(sp, PSET, "OccupancyUse")) <= ROOM_PERSONS
-    except KeyError:
-        return False
+    persons = f.persons(sp, area)
+    return persons is not None and persons <= ROOM_PERSONS
 
 
 def _space_travel_findings(f: Facts, nm, sp, poly, r, fld, lim, open_plan) -> list[Finding]:

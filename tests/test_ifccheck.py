@@ -345,3 +345,16 @@ def test_external_and_separating_wall_minimums(write):
     assert by[(ext.GlobalId,)].detail["required_min"] == 30     # Ninth Part 2 and 214(1)(a) agree
     assert by[(sep.GlobalId,)].detail["required_min"] == 60
     assert by[(sep.GlobalId,)].clause == "UBBL by-law 214(1)"
+
+
+def test_unknown_occupancy_use_is_reported(write):
+    import ifcopenshell.api.pset as pset
+    import ifcopenshell.util.element as ue
+    m = ifcmodel.office(storeys=1)
+    sp = m.by_type("IfcSpace")[0]
+    pset.edit_pset(m, pset=m.by_id(ue.get_psets(sp)["MY_FireSafety"]["id"]), properties={"OccupancyUse": "ballroom"})
+    fs = ifccheck.check(write(m))
+    occ = [f for f in fs if f.rule == "IFC-OCCUPANCY"]
+    assert len(occ) == 1 and occ[0].where == [sp.GlobalId] and "ballroom" in occ[0].message
+    f = ifccheck.Facts(m)
+    assert f.persons(sp) is None and f.persons(m.by_type("IfcSpace")[1]) == 40   # 400 m2 at 10 m2 a person
