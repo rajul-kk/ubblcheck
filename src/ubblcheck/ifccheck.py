@@ -28,14 +28,15 @@ PSET = "MY_FireSafety"
 
 
 def frp_minutes(label) -> int | None:
-    """'60', 'FRP 60 min', 'REI 120', '120 minutes', '1 HR', '1/2 hour' -> minutes; None if unreadable."""
+    """'60', 'FRP 60 min', 'REI 120', 'FD60', '120 minutes', '1 HR', '2 HR FRP', '1/2 hour' -> minutes;
+    None if unreadable.  Accepts what ids_build.FRP_PATTERN accepts (a test holds them together)."""
     if label is None:
         return None
     s = str(label).strip().lower()
-    m = re.fullmatch(r"(?:(?:frp|rei|ei|r) ?)?(\d+) ?(?:min|mins|minute|minutes)?", s)
+    m = re.fullmatch(r"(?:(?:frp|rei|ei|r|fd|frd) ?)?(\d+) ?(?:min|mins|minute|minutes)?", s)
     if m:
         return int(m.group(1))
-    m = re.fullmatch(r"(frp ?)?(1/2|\d+(?:\.\d+)?) ?(hr|hrs|hour|hours)", s)
+    m = re.fullmatch(r"(frp ?)?(1/2|\d+(?:\.\d+)?) ?(hr|hrs|hour|hours)( frp)?", s)
     if m:
         v = 0.5 if m.group(2) == "1/2" else float(m.group(2))
         return int(round(v * 60))
@@ -671,7 +672,8 @@ def _compartment_floors(f: Facts, height):
     return out
 
 
-def _host_wall(door):
+def host_wall(door):
+    """The wall (or other element) whose opening a door or window fills."""
     for rel in getattr(door, "FillsVoids", []) or []:
         opening = rel.RelatingOpeningElement
         for v in getattr(opening, "VoidsElements", []) or []:
@@ -682,7 +684,7 @@ def _host_wall(door):
 def _fire_doors(f: Facts):
     out = []
     for d in f.model.by_type("IfcDoor"):
-        wall = _host_wall(d)
+        wall = host_wall(d)
         if wall is None or not wall.is_a("IfcWall"):
             continue
         if _prop(wall, "Pset_WallCommon", "Compartmentation") is not True:
