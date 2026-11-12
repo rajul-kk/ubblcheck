@@ -19,15 +19,19 @@ import os
 import re
 from collections import defaultdict
 from dataclasses import dataclass
+from functools import cached_property
 
 import ifcopenshell
+import ifcopenshell.util.element as uel
 import ifcopenshell.util.placement as uplace
 from shapely.geometry import Point, Polygon
 from shapely.ops import unary_union
+from shapely.strtree import STRtree
 
 from . import geom, rooms, travel, ubbl
 from .findings import Finding
 from .model import PSET, Facts, common, host_wall, is_floor_slab, label, labels, named, not_floor, objects, prop, rating
+from .ratings import flame_class
 
 ABUT_M = 10.0          # assumption: a face "abuts" access within this distance (not in UBBL)
 
@@ -67,8 +71,10 @@ class Plan:
         cuts = [(e, geom.section(f.mesh(e), cut)) for t in ("IfcWall", "IfcColumn", "IfcCurtainWall")
                 for e in by_storey[t]]
         self.walls = [_Wall(e, c) for e, c in cuts if c is not None and not e.is_a("IfcColumn")]
+        self._wall_index = STRtree([w.near for w in self.walls]) if self.walls else None
         self.openings = [(o, geom.door_outline(o)) for t in ("IfcDoor", "IfcWindow")
                          for o in by_storey[t]]      # (door or window, outline or None)
+        self._coverings = by_storey["IfcCovering"]
         self.obstacles = [c for _, c in cuts]
         self.doors = [(d, o) for d, o in self.openings
                       if d.is_a("IfcDoor") and o is not None and not o.is_empty]
@@ -91,6 +97,34 @@ class Plan:
     def name(self):
         return label(self.storey)
 
+    def walls_along(self, poly) -> list["_Wall"]:
+        """The walls enclosing a room: those running along its outline (_encloses)."""
+        if self._wall_index is None:
+            return []
+        return [self.walls[i] for i in sorted(self._wall_index.query(poly.buffer(TOUCH_M)))
+                if _encloses(poly, self.walls[i])]
+
+    @cached_property
+    def _ceilings(self):
+        """(ceiling coverings, their outlines, an index of the outlines), worked out when first asked."""
+        cs = [(c, fp) for c in self._coverings if uel.get_predefined_type(c) == "CEILING"
+              and (fp := self._facts.footprint(c)) is not None and not fp.is_empty]
+        return cs, (STRtree([fp for _, fp in cs]) if cs else None)
+
+    def ceilings_over(self, poly) -> list:
+        """Ceiling coverings over a room: most of the smaller of the two overlaps the other."""
+        cs, index = self._ceilings
+        if index is None:
+            return []
+        return [c for c, fp in (cs[i] for i in sorted(index.query(poly)))
+                if fp.intersection(poly).area > 0.5 * min(fp.area, poly.area)]
+
+    @property
+    def direct_exit(self) -> bool:
+        """Does an exit door on this storey lead straight outside (Pset_DoorCommon.IsExternal)?"""
+        return any(e.is_a("IfcDoor") and common(e, "IsExternal") is True
+                   for e in [e for e, _ in self.exit_elements] + self.exits_without_plan)
+
     def outline(self, sp):
         """A space's plan outline, or None (Facts caches it, so ask only for the spaces you need)."""
         fp = self._facts.footprint(sp)
@@ -112,9 +146,13 @@ class Plan:
 
 def _by_storey(f: Facts):
     out = defaultdict(lambda: defaultdict(list))
-    for t in ("IfcSpace", "IfcWall", "IfcColumn", "IfcCurtainWall", "IfcDoor", "IfcWindow"):
+    for t in ("IfcSpace", "IfcWall", "IfcColumn", "IfcCurtainWall", "IfcDoor", "IfcWindow", "IfcCovering"):
         for e in f.model.by_type(t):
             st = f.storey_of(e)
+            if st is None and t == "IfcCovering":       # tied to its room only (IfcRelCoversSpaces)
+                st = next((f.storey_of(sp) for rel in getattr(e, "CoversSpaces", None) or ()
+                           if (sp := getattr(rel, "RelatingSpace", None) or getattr(rel, "RelatedSpace", None))),
+                          None)
             if st is not None:
                 out[st.id()][t].append(e)
     return out
@@ -252,7 +290,7 @@ def _enclosed_rooms(plans) -> list[Finding]:
 
 def _enclosure_findings(pl: Plan, sp, poly, kind: _Enclosed) -> list[Finding]:
     where = f"{pl.name} {label(sp)}"
-    around = [w for w in pl.walls if _encloses(poly, w)]
+    around = pl.walls_along(poly)
     walls = [w for w in around if not w.external]
     if not walls:
         if around:          # walled by external walls only: separated from the outside, not the building
@@ -342,6 +380,75 @@ def _assembly_rooms(f: Facts, plans) -> list[Finding]:
                 out.append(Finding("GEO-ASSEMBLY-WIDTH", "error",
                                    f"{where}: exit door(s) {', '.join(label(d) for d in narrow)} narrower than "
                                    f"{ubbl.ASSEMBLY_MIN_DOOR_MM} mm", "UBBL by-law 181", [d.GlobalId for d in narrow]))
+    return out
+
+
+def _surface_class(el):
+    """(element, class) for the face of a wall or ceiling: its lining's class when a covering on it
+    (IfcRelCoversBldgElements) states one, the worst of several, else its own; class None if unread."""
+    linings = [c for rel in getattr(el, "HasCoverings", None) or () for c in rel.RelatedCoverings]
+    stated = [(c, k) for c in linings if (k := flame_class(common(c, "SurfaceSpreadOfFlame"))) is not None]
+    if stated:
+        return max(stated, key=lambda ck: ck[1])
+    return el, flame_class(common(el, "SurfaceSpreadOfFlame"))
+
+
+_PLACE_WORDS = {"exits": "an exit (stair)", "access": "an access to exits", "other": "a room"}
+
+
+def _flame_spread(f: Facts, plans) -> list[Finding]:
+    """By-laws 204-206 and the Eighth Schedule: the walls along a space's outline and the ceilings
+    over it have a SurfaceSpreadOfFlame class no worse than the schedule allows for the place
+    (a stair is an exit, a corridor or lobby an access to exits, by name) and the purpose group.
+    Sprinklers relax it (205(3)); an occupied basement with no exit door straight outside needs
+    Class 0 or 1, storage and service rooms aside (205(4)).  The small-area allowances (206(2)-(3)),
+    the hospital allowance for rooms of 4 or fewer, and plastic ceilings (207) are not judged."""
+    clause = "UBBL by-law 204-206, Eighth Schedule"
+    surfaces = [e for t in ("IfcWall", "IfcCurtainWall", "IfcCovering") for e in f.model.by_type(t)]
+    if not any(common(e, "SurfaceSpreadOfFlame") is not None for e in surfaces):
+        return [Finding("GEO-FLAME-DATA", "info", "No wall or ceiling states its class of surface spread of "
+                        "flame (Pset_WallCommon / Pset_CoveringCommon .SurfaceSpreadOfFlame), so by-laws "
+                        "204-206 were not checked", clause, [])] if surfaces else []
+    try:
+        key = ubbl.use_key(f.group, f.use)
+    except KeyError:
+        return []           # IFC-TRAVEL-USE reports the unknown use
+    row = ubbl.eighth_row(key)
+    if row is None:
+        return [Finding("GEO-FLAME", "info", f"The Eighth Schedule copy used has no row for "
+                        f"{ubbl.PURPOSE_GROUPS[f.group].lower()} (group {f.group}), so the classes of "
+                        "surface spread of flame were not checked", clause, [])]
+    small_shop = key == "V" and f.sizes.building_area <= ubbl.SMALL_SHOP_M2 and len(f.floor_storeys) <= 1
+    out, unread = [], {}
+    for pl in plans:
+        underground = f.is_basement(pl.storey) and not pl.direct_exit
+        for sp, poly in pl.spaces:
+            place = "exits" if named(sp, rooms.STAIR) else "access" if named(sp, rooms.CIRCULATION) else "other"
+            occupied_basement = underground and f.group != "I" and not named(sp, rooms.STORAGE_OR_SERVICE)
+            weak = []
+            for surface, els in (("walls", [w.el for w in pl.walls_along(poly)]),
+                                 ("ceiling", pl.ceilings_over(poly))):
+                need = ubbl.flame_limit(row, place, surface, f.sprinklered, small_shop, occupied_basement)
+                if need is None:
+                    continue
+                for e in els:
+                    shown, c = _surface_class(e)
+                    if c is None:
+                        unread[e.id()] = e
+                    elif c > need:
+                        weak.append((shown, c, need))
+            if weak:
+                what = "; ".join(f"{label(e)} Class {c} (needs {n} or better)" for e, c, n in weak[:6]) \
+                    + (" ..." if len(weak) > 6 else "")
+                out.append(Finding("GEO-FLAME", "warning",
+                                   f"{pl.name} {label(sp)}: {_PLACE_WORDS[place]}"
+                                   + (", underground" if occupied_basement else "")
+                                   + (", sprinklered" if f.sprinklered else "") + f": {what}", clause,
+                                   [sp.GlobalId] + [e.GlobalId for e, _, _ in weak]))
+    if unread:
+        out.append(Finding("GEO-FLAME-DATA", "info", f"{len(unread)} wall(s) or ceiling(s) around rooms state "
+                           "no class of surface spread of flame the checker can read (Class 0 to 4)", clause,
+                           [e.GlobalId for e in unread.values()]))
     return out
 
 
@@ -553,6 +660,7 @@ def check(model: ifcopenshell.file, heat_dir: str | None = None, cell: float = 0
     pls = plans(f)
     out = _enclosed_rooms(pls) + _assembly_rooms(f, pls)
     if f.group in ubbl.PURPOSE_GROUPS:
+        out += _flame_spread(f, pls)
         out += _travel(f, pls, heat_dir, cell, {} if heatmaps is None else heatmaps)
         out += _exit_spacing(f, pls)
     out += _access(f)

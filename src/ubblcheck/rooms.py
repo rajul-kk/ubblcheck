@@ -40,6 +40,11 @@ BOILER_OR_STORE = re.compile(r"boiler|dandang|storage|store ?room|\bstores\b|\bs
 SMOKE_VENT = re.compile(r"smoke[\s_-]*((and|&)\s*heat\s*)?(vent|extract|exhaust|outlet|hatch|spill|relief)"
                         r"|\bSHEVS?\b|\bAOV\b|(pelega|bolong|ekzos|lubang)\s+asap|asap\s+pelega", re.I)
 
+# by-law 205(4): the storage and service rooms an underground storey may have without Class 0 or 1
+STORAGE_OR_SERVICE = re.compile(BOILER_OR_STORE.pattern + r"|car ?park|parking|letak kereta|garage|plant|m&e"
+                                r"|\bmech|electrical|genset|generator|pump|\bpam\b|\bahu\b|riser|shaft|duct"
+                                r"|substation|transformer|switch ?room|\bTNB\b", re.I)
+
 FOAM_INLET = re.compile(r"foam[\s_-]*inlet|inlet[\s_-]*(busa|buih)|(busa|buih)[\s_-]*inlet"
                         r"|salur masuk (busa|buih)", re.I)
 
@@ -54,6 +59,9 @@ ASSEMBLY_USE = (
     ("concentrated", re.compile(r"\b(auditorium|hall|dewan|surau|mosque|masjid|church|gereja|temple|kuil|tokong"
                                 r"|prayer|worship|dance|lodge|cinema|panggung|theat(re|er)|lecture|kuliah)", re.I)),
 )
+# by-law 168 and the Eighth Schedule's "exits": escape stairs
+STAIR = re.compile(r"\bstair|\btangga\b", re.I)
+
 # rooms people pass through: not places of assembly (an entrance hall is no hall), and ancillary
 CIRCULATION = re.compile(r"\b(entry|entrance|lift|lif|stair)\s*hall|\blobb(y|ies)\b|\blobi\b|\bfoyer\b"
                          r"|\bcorridor|\bkoridor\b|\bhallway|\bpassage|\blaluan\b", re.I)

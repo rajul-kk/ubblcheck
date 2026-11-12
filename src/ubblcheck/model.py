@@ -25,7 +25,7 @@ PSET = "MY_FireSafety"
 COMMON_PSET = {"IfcWall": "Pset_WallCommon", "IfcCurtainWall": "Pset_CurtainWallCommon",
                "IfcDoor": "Pset_DoorCommon", "IfcWindow": "Pset_WindowCommon", "IfcSlab": "Pset_SlabCommon",
                "IfcColumn": "Pset_ColumnCommon", "IfcBeam": "Pset_BeamCommon", "IfcStair": "Pset_StairCommon",
-               "IfcBuilding": "Pset_BuildingCommon"}
+               "IfcCovering": "Pset_CoveringCommon", "IfcBuilding": "Pset_BuildingCommon"}
 
 
 def prop(el, pset, name, default=None):

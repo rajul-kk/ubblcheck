@@ -458,3 +458,96 @@ def test_shaft_on_a_long_wall_ignores_other_rooms_openings():
     md.space(st, G.rect(0.1, 5.1, 1.9, 6.9), 0.0, "R01", long_name="Riser")
     fs = [x for x in georules.check(md.m) if x.rule == "GEO-SHAFT"]
     assert len(fs) == 1 and near in fs[0].where and not others & set(fs[0].where)
+
+
+@pytest.mark.parametrize("label, cls", [("Class 0", 0), ("Class O", 0), ("class 1", 1), ("2", 2), ("Class 4", 4),
+                                        ("Class 5", None), ("non-combustible", None), (None, None)])
+def test_flame_class_labels(label, cls):
+    from ubblcheck.ratings import flame_class
+    assert flame_class(label) == cls
+
+
+def _flame_floor(room="Corridor", walls="Class 3", ceiling=None, group="IV", sprinklered=False, z=0.0,
+                 lining=None, external_exit=False):
+    """A floor with a 4 x 4 m room walled in walls of the given class (lined, on its first wall, with a
+    covering of class `lining`), and a ceiling over it."""
+    import ifcopenshell
+    import ifcopenshell.api.pset as pset
+    import ifcopenshell.util.element as ue
+    md = G.Model(group=group, sprinklered=sprinklered)
+    st = md.storey("L0", z)
+    G.box_floor(md, st, 20, 10, z=z, exits=((0, 2.0),))
+    corners = [(8, 3), (12, 3), (12, 7), (8, 7)]
+    ws = [md.wall(st, corners[i], corners[(i + 1) % 4], z, name=f"R-W{i}") for i in range(4)]
+    for w in ws:
+        pset.edit_pset(md.m, pset=md.m.by_id(ue.get_psets(w)["Pset_WallCommon"]["id"]),
+                       properties={"SurfaceSpreadOfFlame": walls})
+    if external_exit:
+        for d in md.m.by_type("IfcDoor"):
+            pset.edit_pset(md.m, pset=md.m.by_id(ue.get_psets(d)["Pset_DoorCommon"]["id"]),
+                           properties={"IsExternal": True})
+    if lining:
+        cov = md.m.createIfcCovering(ifcopenshell.guid.new(), None, "Panelling", PredefinedType="CLADDING")
+        G._ps(md.m, cov, "Pset_CoveringCommon", {"SurfaceSpreadOfFlame": lining})
+        md.m.createIfcRelCoversBldgElements(ifcopenshell.guid.new(), None, None, None, ws[0], [cov])
+        ws = [cov] + ws[1:]
+    c = md.ceiling(st, G.rect(8, 3, 12, 7), z, flame=ceiling) if ceiling else None
+    sp = md.space(st, G.rect(8.1, 3.1, 11.9, 6.9), z, "R01", long_name=room)
+    fs = [x for x in georules.check(md.m) if x.rule == "GEO-FLAME"]
+    return fs, sp, ws, c
+
+
+def test_flame_spread_by_place():
+    assert _flame_floor(room="Office", walls="Class 3")[0] == []          # other spaces: Class 3
+    fs, sp, ws, _ = _flame_floor(room="Corridor", walls="Class 3")        # access to exits: Class 1
+    assert [x.where for x in fs] == [[sp.GlobalId] + [w.GlobalId for w in ws]]
+    assert "access to exits" in fs[0].message and "needs 1 or better" in fs[0].message
+    assert _flame_floor(room="Corridor", walls="Class 1")[0] == []
+    fs = _flame_floor(room="Stair 1", walls="Class 2")[0]                  # office exits: Class 1
+    assert len(fs) == 1 and "an exit" in fs[0].message
+
+
+def test_flame_spread_ceiling():
+    fs, sp, _, c = _flame_floor(room="Lobby", walls="Class 0", ceiling="Class 2")
+    assert [x.where for x in fs] == [[sp.GlobalId, c.GlobalId]]
+    assert _flame_floor(room="Lobby", walls="Class 0", ceiling="Class 1")[0] == []
+
+
+def test_flame_spread_sprinklers_relax_one_class():
+    assert _flame_floor(room="Corridor", walls="Class 2", sprinklered=True)[0] == []
+    fs = _flame_floor(room="Corridor", walls="Class 3", sprinklered=True)[0]
+    assert len(fs) == 1 and "needs 2 or better" in fs[0].message
+
+
+def test_flame_spread_occupied_basement():
+    fs = _flame_floor(room="Office", walls="Class 3", z=-3.5)[0]
+    assert len(fs) == 1 and "underground" in fs[0].message and "needs 1 or better" in fs[0].message
+    assert _flame_floor(room="Store Room", walls="Class 3", z=-3.5)[0] == []   # storage is exempt
+    assert _flame_floor(room="Car Park", walls="Class 3", z=-3.5)[0] == []
+    fs = _flame_floor(room="Corridor", walls="Class 3", z=-3.5, group="VI")[0]  # factory: 3, but 1 underground
+    assert len(fs) == 1 and "underground" in fs[0].message
+    assert _flame_floor(room="Office", walls="Class 3", z=-3.5, external_exit=True)[0] == []   # direct exit out
+
+
+def test_flame_spread_reads_a_wall_lining():
+    fs, sp, ws, _ = _flame_floor(room="Corridor", walls="Class 0", lining="Class 3")
+    assert [x.where for x in fs] == [[sp.GlobalId, ws[0].GlobalId]] and "Panelling" in fs[0].message
+    fs, sp, ws, _ = _flame_floor(room="Corridor", walls="Class 3", lining="Class 0")   # the lined wall passes
+    assert [x.where for x in fs] == [[sp.GlobalId] + [w.GlobalId for w in ws[1:]]]
+
+
+def test_flame_spread_group_with_no_schedule_row_is_said():
+    md, st = one_storey(20, 10, ((0, 2.0),), group="VII")
+    w = md.m.by_type("IfcWall")[0]
+    import ifcopenshell.api.pset as pset
+    import ifcopenshell.util.element as ue
+    pset.edit_pset(md.m, pset=md.m.by_id(ue.get_psets(w)["Pset_WallCommon"]["id"]),
+                   properties={"SurfaceSpreadOfFlame": "Class 1"})
+    fs = [x for x in georules.check(md.m) if x.rule == "GEO-FLAME"]
+    assert [x.severity for x in fs] == ["info"] and "no row" in fs[0].message
+
+
+def test_flame_spread_without_data_is_one_note():
+    md, st = one_storey(20, 10, ((0, 2.0),), group="IV")
+    fs = [x for x in georules.check(md.m) if x.rule.startswith("GEO-FLAME")]
+    assert [(x.rule, x.severity) for x in fs] == [("GEO-FLAME-DATA", "info")]

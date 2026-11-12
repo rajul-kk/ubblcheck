@@ -73,6 +73,19 @@ class Model:
         self._contain(sl, st)
         return sl
 
+    def ceiling(self, st, pts, z, flame=None, name="CEIL"):
+        """A suspended ceiling (IfcCovering CEILING) 2.7 m above the floor, its class of surface
+        spread of flame given."""
+        c = root.create_entity(self.m, ifc_class="IfcCovering", name=name, predefined_type="CEILING")
+        geo.assign_representation(self.m, product=c,
+                                  representation=geo.add_slab_representation(self.m, context=self.body,
+                                                                             depth=0.02, polyline=pts))
+        geo.edit_object_placement(self.m, product=c, matrix=_mat(0, 0, z + 2.7))
+        if flame is not None:
+            _ps(self.m, c, "Pset_CoveringCommon", {"SurfaceSpreadOfFlame": flame})
+        self._contain(c, st)
+        return c
+
     def wall(self, st, a, b, z, name="W", thickness=T):
         (x1, y1), (x2, y2) = a, b
         L = math.hypot(x2 - x1, y2 - y1)

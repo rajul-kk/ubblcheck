@@ -28,6 +28,17 @@ def rating_pattern(minutes=STANDARD_MINUTES, hours=STANDARD_HOURS) -> str:
 _RATING = re.compile(rating_pattern(minutes=[r"\d+"], hours=["1/2", r"\d+(?:\.\d+)?"]), re.I)
 
 
+# SurfaceSpreadOfFlame is an IfcLabel too: the class of by-law 204 (BS 476 Part 7), 'Class 0' (or
+# 'Class O') the best, then 1 to 4.
+_FLAME = re.compile(r"(?:class\s*)?([0o1-4])", re.I)
+
+
+def flame_class(label) -> int | None:
+    """'Class 0', 'Class O', 'class 1', '2' -> 0..4 (lower is better); None if unreadable."""
+    m = _FLAME.fullmatch(str(label).strip()) if label is not None else None
+    return None if m is None else (0 if m.group(1) in "oO" else int(m.group(1)))
+
+
 def frp_minutes(label) -> int | None:
     """'60', 'FRP 60 min', 'REI 120', 'FD60', '120 minutes', '1 HR', '2 HR FRP', '1/2 hour' -> minutes;
     None if unreadable."""

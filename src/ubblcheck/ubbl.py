@@ -262,6 +262,48 @@ def assembly_units(width_mm: float) -> float:
     return full + (0.5 if full >= 1 and rest >= ASSEMBLY_HALF_UNIT_MM else 0.0)
 
 
+# Eighth Schedule (by-laws 204, 206): the lowest class of surface allowed, Class 0 best, by place:
+# key (as TRAVEL) -> (exits, access to exits, other spaces' walls, other spaces' ceilings); None = NR.
+# The public copy prints no rows for groups VII and VIII (its notes define the assembly classes, so
+# rows were lost): those groups are not checked.
+EIGHTH = {
+    "I": (None, None, None, None),
+    "II": (0, 0, 3, 3),                 # institutional, schools, open or flexible plan
+    "II.hospital": (0, 0, 1, 1),        # 2 in a room for 4 or fewer: not applied (needs bed counts)
+    "III": (1, 1, 3, 3),                # flats, dormitories
+    "III.hotel": (0, 0, 3, 3),
+    "IV": (1, 1, 3, 3),
+    "V": (0, 0, 3, 2),                  # shop class A and B; class C (small shop): other spaces 3
+    "VI": (3, 3, 3, 3),
+}
+SMALL_SHOP_M2 = 300                     # Eighth Schedule note: class C shop, ground floor only
+
+
+def eighth_row(key: str) -> tuple | None:
+    """The Eighth Schedule row for a TRAVEL key (its group's row when the use has none), or None."""
+    return EIGHTH.get(key, EIGHTH.get(key.split(".")[0]))
+
+
+BASEMENT_FLAME_CLASS = 1    # by-law 205(4): occupied underground spaces, Class 0 or 1
+
+
+def flame_limit(row: tuple, place: str, surface: str, sprinklered: bool,
+                small_shop: bool = False, underground: bool = False) -> int | None:
+    """Worst class allowed (0-4) for a surface ('walls' or 'ceiling') in a place ('exits', 'access'
+    or 'other'), or None (no requirement).  Sprinklers let each class go one lower, to Class 3 at
+    most (by-law 205(3)); an occupied space underground with no direct exit outside is Class 1 at
+    worst, sprinklered or not (205(4))."""
+    exits, access, walls, ceiling = row
+    need = {"exits": exits, "access": access}.get(place, walls if surface == "walls" else ceiling)
+    if place == "other" and need is not None and small_shop:
+        need = 3
+    if need is not None and sprinklered and need < 3:
+        need += 1
+    if underground:
+        need = BASEMENT_FLAME_CLASS if need is None else min(need, BASEMENT_FLAME_CLASS)
+    return need
+
+
 # Other numeric thresholds used by checks.
 COMPARTMENT_FLOOR_HEIGHT_M = 30     # by-law 137
 COMPARTMENT_FLOOR_ABOVE_M = 9       # by-law 137
