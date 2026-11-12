@@ -190,6 +190,15 @@ class Facts:
             a = fp.area if fp is not None else 0.0
         return a
 
+    def persons(self, space, area: float | None = None) -> int | None:
+        """Occupant load of a space (Seventh Schedule): its floor area, or `area` when given, over
+        the load factor of its OccupancyUse, else of the building's group.  None when there is no
+        row for it: an unknown use (reported once, IFC-OCCUPANCY) or a group with no load row."""
+        row = ubbl.load_row(self.group, _prop(space, PSET, "OccupancyUse"))
+        if row is None:
+            return None
+        return ubbl.occupant_load(self.floor_area(space) if area is None else area, self.group, row)
+
     def floor_volume(self, space) -> float | None:
         """Declared volume, else the volume of the space's geometry, else None.  Voids count as 0."""
         if not_floor(space):
@@ -224,6 +233,7 @@ def check_rules(model: ifcopenshell.file) -> list[Finding]:
     single = len(f.occupied) <= 1
     out += _compartments(f, height, single)
     out += _travel(f)
+    out += _occupancy_uses(f)
     out += _exits(f)
     out += _compartment_floors(f, height)
     out += _fire_doors(f)
@@ -362,31 +372,63 @@ def _wall_minimum(el, ps) -> tuple[int, str]:
     return 0, ""
 
 
+@dataclass(frozen=True)
+class _Need:
+    """The period one element needs, and where it comes from."""
+    minutes: int
+    clause: str
+    line: str           # Ninth Schedule line, or what kind of wall by-law 214 holds it to
+    basis: str = ""     # compartment or building the line was chosen from (Ninth Schedule only)
+
+
+class _NinthLines:
+    """Ninth Schedule lines by compartment, looked up once each.  Compartments larger than every
+    line are collected in `too_big`."""
+
+    def __init__(self, f: Facts, height, sizes):
+        self.f, self.height, self.sizes = f, height, sizes
+        self.lines, self.too_big = {}, []
+
+    def __call__(self, cid):
+        if cid not in self.lines:
+            label, area, vol = self.sizes.basis(cid)
+            self.lines[cid] = ubbl.fire_resistance(self.f.group, self.height, area, vol, self.sizes.storeys,
+                                                   self.f.sprinklered, compartment=cid is not None)
+            if self.lines[cid] is None:
+                self.too_big.append((label, area, vol))
+        return self.lines[cid]
+
+
+def _element_need(f: Facts, el, ps, kind, st, compartment, lines: _NinthLines) -> _Need | None:
+    """The strictest period over every compartment the element is in (by-law 216(2)) and, for a
+    wall, by-law 214(1).  None when every compartment is oversized (IFC-FRP-SIZE)."""
+    sizes = lines.sizes
+    basement = f.is_basement(st)
+    over_basement = (kind == "floor" and bool(f.basements)
+                     and st == min(f.above_ground, key=f.elev, default=None))
+    barea = sizes.storey_area.get(st.id()) if basement else None
+    needs = []
+    for cid in _compartments_of(f, el, st, sizes):
+        req = lines(cid)
+        if req is not None:
+            needs.append(_Need(ubbl.element_frp(req, kind, basement or over_basement, compartment, barea),
+                               ubbl.NINTH_CLAUSE, req.line, sizes.basis(cid)[0]))
+    if kind == "wall":
+        least, why = _wall_minimum(el, ps)
+        if least:
+            needs.append(_Need(least, ubbl.WALL_MIN_CLAUSE, why))
+    return max(needs, key=lambda n: n.minutes, default=None)
+
+
 def _ninth(f: Facts, height):
     """Ninth Schedule periods for elements of structure.  The line is chosen from the size of the
     compartment each element is in (or bounds); without compartments, from the building."""
-    out = []
     sizes = dimensions(f)
     if not sizes.storey_area:
-        return out
-    reqs, too_big = {}, []
-
-    def requirement(cid):
-        if cid not in reqs:
-            label, area, vol = sizes.basis(cid)
-            reqs[cid] = ubbl.fire_resistance(f.group, height, area, vol, sizes.storeys, f.sprinklered,
-                                             compartment=cid is not None)
-            if reqs[cid] is None:
-                too_big.append((label, area, vol))
-        return reqs[cid]
-
-    basements = {s.id() for s in f.basements}
-    ground = min(f.above_ground, key=f.elev, default=None)
-    over_basement = ground.id() if (basements and ground is not None) else None
-    single = sizes.storeys <= 1 and not basements
-    short = defaultdict(list)
-    unread = defaultdict(list)
-    exempt = defaultdict(int)
+        return []
+    lines = _NinthLines(f, height, sizes)
+    single = sizes.storeys <= 1 and not f.basements
+    short, unread, exempt = defaultdict(list), defaultdict(list), defaultdict(int)
     for el, ps, kind, st in _structure(f):
         compartment = _prop(el, ps, "Compartmentation") is True
         if single and _exempt_single_storey(el, ps, kind, compartment):
@@ -397,24 +439,29 @@ def _ninth(f: Facts, height):
             if not compartment:     # compartment walls and floors: the IDS pack (MY-P08, MY-P09) reports them
                 unread[kind].append(el)
             continue
-        base = st.id() in basements or (kind == "floor" and st.id() == over_basement)
-        barea = sizes.storey_area.get(st.id()) if st.id() in basements else None
-        # (minutes, which rule, its line or reason, basis); the strictest wins (by-law 216(2))
-        needs = []
-        for cid in _compartments_of(f, el, st, sizes):
-            req = requirement(cid)
-            if req is not None:
-                needs.append((ubbl.element_frp(req, kind, base, compartment, barea), "ninth", req.line,
-                              sizes.basis(cid)[0]))
-        if kind == "wall":
-            least, why = _wall_minimum(el, ps)
-            if least:
-                needs.append((least, "214", why, ""))
-        if not needs:
-            continue                # every compartment it is in is oversized: IFC-FRP-SIZE below
-        need = max(needs, key=lambda n: n[0])
-        if have < need[0]:
-            short[(st.Name, kind) + need].append((el, have))
+        need = _element_need(f, el, ps, kind, st, compartment, lines)
+        if need is not None and have < need.minutes:
+            short[(st.Name, kind, need)].append((el, have))
+    return (_ninth_notes(f, height, exempt, lines.too_big, unread)
+            + [_frp_short(storey, kind, need, els) for (storey, kind, need), els
+               in sorted(short.items(), key=lambda kv: (kv[0][0], kv[0][1], kv[0][2].minutes, kv[0][2].line))])
+
+
+def _frp_short(storey, kind, need: _Need, els) -> Finding:
+    worst = min(h for _, h in els)
+    gids = [e.GlobalId for e, _ in els]
+    if need.clause == ubbl.WALL_MIN_CLAUSE:
+        return Finding("IFC-FRP", "error", f"{storey}: {len(els)} {need.line}(s) below the {need.minutes} min "
+                       f"by-law 214(1) requires (lowest {worst} min)", need.clause, gids,
+                       {"required_min": need.minutes, "lowest_min": worst, "line": "by-law 214(1)"})
+    return Finding("IFC-FRP", "error", f"{storey}: {len(els)} {kind}(s) below the {need.minutes} min the Ninth "
+                   f"Schedule requires (lowest {worst} min; {need.line}; {need.basis})", need.clause, gids,
+                   {"required_min": need.minutes, "lowest_min": worst, "line": need.line, "basis": need.basis})
+
+
+def _ninth_notes(f: Facts, height, exempt, too_big, unread) -> list[Finding]:
+    """What the Ninth Schedule check left out, and why: exempt, oversized, or unreadable."""
+    out = []
     if exempt:
         what = ", ".join(f"{n} {k}{'s' if n > 1 else ''}" for k, n in sorted(exempt.items()))
         out.append(Finding("IFC-FRP-SINGLE", "info",
@@ -438,20 +485,6 @@ def _ninth(f: Facts, height):
                            "Schedule period was not checked. Use minutes (60, FRP 60 min, REI 60) or hours (1 HR)",
                            ubbl.NINTH_CLAUSE, [e.GlobalId for v in unread.values() for e in v],
                            {"by_kind": {k: len(v) for k, v in unread.items()}}))
-    for (storey, kind, need, rule, line, label), els in sorted(short.items(),
-                                                              key=lambda kv: tuple(map(str, kv[0]))):
-        worst = min(h for _, h in els)
-        gids = [e.GlobalId for e, _ in els]
-        if rule == "214":
-            out.append(Finding("IFC-FRP", "error",
-                               f"{storey}: {len(els)} {line}(s) below the {need} min by-law 214(1) requires "
-                               f"(lowest {worst} min)", ubbl.WALL_MIN_CLAUSE, gids,
-                               {"required_min": need, "lowest_min": worst, "line": "by-law 214(1)"}))
-            continue
-        out.append(Finding("IFC-FRP", "error",
-                           f"{storey}: {len(els)} {kind}(s) below the {need} min the Ninth Schedule requires "
-                           f"(lowest {worst} min; {line}; {label})", ubbl.NINTH_CLAUSE, gids,
-                           {"required_min": need, "lowest_min": worst, "line": line, "basis": label}))
     return out
 
 
@@ -535,12 +568,7 @@ def _exits(f: Facts):
         st = f.storey_of(sp)
         if st is None:
             continue
-        a = f.floor_area(sp)
-        use = _prop(sp, PSET, "OccupancyUse")
-        try:
-            load[st.Name] += ubbl.occupant_load(a, f.group, use)
-        except KeyError:
-            continue
+        load[st.Name] += f.persons(sp) or 0      # an unknown use is reported by _occupancy_uses
     exits = _storey_exits(f)
     top = max((f.elev(s) for s in f.occupied), default=0.0)
     single_ok = ubbl.single_stair_allowed(f.group, f.use, top)
@@ -568,6 +596,22 @@ def _exits(f: Facts):
                                f"exit doors give {have}", "UBBL by-law 175-176, Seventh Schedule", gids,
                                {"persons": persons, "units_needed": need, "units_given": have}))
     return out
+
+
+def _occupancy_uses(f: Facts) -> list[Finding]:
+    """Spaces whose OccupancyUse names no Seventh Schedule row: their occupants are not counted."""
+    bad = [sp for sp in f.model.by_type("IfcSpace")
+           if _prop(sp, PSET, "OccupancyUse") is not None and not not_floor(sp)
+           and ubbl.load_row(f.group, _prop(sp, PSET, "OccupancyUse")) is None]
+    if not bad:
+        return []
+    uses = sorted({str(_prop(sp, PSET, "OccupancyUse")) for sp in bad})
+    rows = sorted(k.split(".", 1)[1] for k in ubbl.OCCUPANT_LOAD if k.startswith(f"{f.group}."))
+    return [Finding("IFC-OCCUPANCY", "error",
+                    f"{len(bad)} space(s) have an OccupancyUse with no Seventh Schedule row for group {f.group} "
+                    f"({', '.join(uses)}); their occupants are not counted in the exit checks. "
+                    f"Rows for this group: {', '.join(rows) or 'none (leave OccupancyUse empty)'}",
+                    "UBBL by-law 175, Seventh Schedule", [sp.GlobalId for sp in bad], {"uses": uses})]
 
 
 def _storey_exits(f: Facts) -> dict[str, tuple[list, bool]]:
