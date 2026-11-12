@@ -27,13 +27,14 @@ The models are not kept in the repository.
 
 | Found | Effect | Now |
 |---|---|---|
-| IFC2X3 has no `IfcFireSuppressionTerminal`, `IfcSensor` or `IfcAlarm`. Revit 2X3 exports describe these objects through their type objects instead. | Office_A and dental_clinic crashed in the Tenth Schedule check. | `ifccheck.objects()` reads the predefined type from the occurrence or its type object, in any schema. |
+| IFC2X3 has no `IfcFireSuppressionTerminal`, `IfcSensor` or `IfcAlarm`. Revit 2X3 exports describe these objects through their type objects instead. | Office_A and dental_clinic crashed in the Tenth Schedule check. | `model.objects()` reads the predefined type from the occurrence or its type object, in any schema. |
 | No model says which doors are fire exits. | Every storey got "0 exit doors" and "0 exit width" errors, plus one "no exit" error per storey. | When no door states `Pset_DoorCommon.FireExit`, the checker gives one warning for exits and one for travel distance. |
 | The C20 basement slab doesn't say whether it is a compartment floor. | An error said it "must be" one. | An error only when the slab is declared not to be a compartment floor. When nothing is declared, a warning asks for the property. Only floor slabs are considered. |
 | Room names "Hallway" and "entry hall" matched the Group VII word *hall*. | The houses were reported as containing a place of assembly. | Hallways, entrance halls, foyers and passages count as circulation. *Hall* matches only as a whole word. |
 | A Revit space named "OPEN TO BELOW" sits on the dental clinic's roof storey. | The void counted as floor area, and its storey counted as a storey of the building. | Voids, double-height volumes and `GFA` area zones count as zero floor area. |
 | "Building purpose group is None" | Read like a crash. | Says the group is not declared, and which property to set. |
 | With its four external doors flagged as fire exits, the duplex's upper storey still had "0 exit doors": it is left by the stair inside each unit. | Two exit errors on the upper storey, and two more on a Revit space named "Roof". | A storey with no exit door counts the escape stairs coming up from the storey below. Spaces named only "Roof" or "Attic" count as zero floor area. With its stairs flagged as well, the duplex has no exit findings. |
+| The dental clinic's gas store is walled with Revit walls typed "Rated 1-HR", and each carries `Pset_WallCommon.FireRating` "1 HR". | The risk-room check read a rating only from an object of class exactly `IfcWall`, so the clinic's `IfcWallStandardCase` walls (every IFC2X3 export) were listed as unrated. | Ratings are read from the common property set of the element's class or any of its parents. |
 
 ## What is left, as published
 
