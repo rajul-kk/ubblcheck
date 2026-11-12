@@ -21,7 +21,7 @@ def _qto(m, el, name, props):
 def office(storeys=2, space_area=400.0, comp_split=True, travel=40.0, exit_width=1.2,
            exits_per_storey=2, door_frp="60", wall_frp="60", sprinklered=False,
            group="IV", height=None, storey_h=4.0, slab_comp=True, tags=True, fire_lift=False,
-           breeching=False, roof=False):
+           breeching=False, roof=False, self_closing=True):
     m = ifcopenshell.file(schema="IFC4")
     proj = root.create_entity(m, ifc_class="IfcProject", name="Test")
     unit.assign_unit(m, length={"is_metric": True, "raw": "METRES"})
@@ -56,6 +56,8 @@ def office(storeys=2, space_area=400.0, comp_split=True, travel=40.0, exit_width
             dp = {"FireExit": True}
             if door_frp is not None:
                 dp["FireRating"] = door_frp
+            if self_closing is not None:
+                dp["SelfClosing"] = self_closing
             _ps(m, d, "Pset_DoorCommon", dp)
             op = root.create_entity(m, ifc_class="IfcOpeningElement")
             feat.add_feature(m, feature=op, element=wall)

@@ -227,6 +227,7 @@ def check_rules(model: ifcopenshell.file) -> list[Finding]:
     out += _exits(f)
     out += _compartment_floors(f, height)
     out += _fire_doors(f)
+    out += _door_closers(f)
     out += _ninth(f, height)
     out += _systems(f)
     out += _tenth(f, height)
@@ -327,13 +328,14 @@ _FLOOR_SLABS = ("FLOOR", "BASESLAB", "NOTDEFINED", "")
 
 def _structure(f: Facts):
     """(element, common pset, kind, storey) for each element of structure the Ninth Schedule covers:
-    columns, beams, floor slabs, and walls that are loadbearing or compartment walls."""
+    columns, beams, floor slabs, and walls that are loadbearing, compartment or separating walls."""
     for cls, (ps, kind) in _STRUCTURE.items():
         for el in f.model.by_type(cls):
             if cls == "IfcSlab" and (el.PredefinedType or "") not in _FLOOR_SLABS:
                 continue
             if cls == "IfcWall" and not (_prop(el, ps, "LoadBearing") is True
-                                         or _prop(el, ps, "Compartmentation") is True):
+                                         or _prop(el, ps, "Compartmentation") is True
+                                         or _prop(el, PSET, "SeparatingWall") is True):
                 continue
             st = f.storey_of(el)
             if st is not None:
@@ -347,7 +349,17 @@ def _exempt_single_storey(el, ps, kind, compartment) -> bool:
     so the info finding names the condition.)"""
     if kind in ("column", "beam"):
         return True
-    return kind == "wall" and not compartment and _prop(el, ps, "IsExternal") is not True
+    return (kind == "wall" and not compartment and _prop(el, ps, "IsExternal") is not True
+            and _prop(el, PSET, "SeparatingWall") is not True)
+
+
+def _wall_minimum(el, ps) -> tuple[int, str]:
+    """By-law 214(1): minutes a wall needs whatever its Ninth Schedule line, and why (0 if none)."""
+    if _prop(el, PSET, "SeparatingWall") is True:
+        return ubbl.SEPARATING_WALL_MIN, "separating wall"
+    if _prop(el, ps, "IsExternal") is True and _prop(el, ps, "LoadBearing") is True:
+        return ubbl.EXTERNAL_WALL_MIN, "loadbearing external wall"
+    return 0, ""
 
 
 def _ninth(f: Facts, height):
@@ -387,16 +399,22 @@ def _ninth(f: Facts, height):
             continue
         base = st.id() in basements or (kind == "floor" and st.id() == over_basement)
         barea = sizes.storey_area.get(st.id()) if st.id() in basements else None
+        # (minutes, which rule, its line or reason, basis); the strictest wins (by-law 216(2))
         needs = []
         for cid in _compartments_of(f, el, st, sizes):
             req = requirement(cid)
             if req is not None:
-                needs.append((ubbl.element_frp(req, kind, base, compartment, barea), sizes.basis(cid)[0], req))
+                needs.append((ubbl.element_frp(req, kind, base, compartment, barea), "ninth", req.line,
+                              sizes.basis(cid)[0]))
+        if kind == "wall":
+            least, why = _wall_minimum(el, ps)
+            if least:
+                needs.append((least, "214", why, ""))
         if not needs:
             continue                # every compartment it is in is oversized: IFC-FRP-SIZE below
-        need, label, req = max(needs, key=lambda n: n[0])
-        if have < need:
-            short[(st.Name, kind, need, label, req.line)].append((el, have))
+        need = max(needs, key=lambda n: n[0])
+        if have < need[0]:
+            short[(st.Name, kind) + need].append((el, have))
     if exempt:
         what = ", ".join(f"{n} {k}{'s' if n > 1 else ''}" for k, n in sorted(exempt.items()))
         out.append(Finding("IFC-FRP-SINGLE", "info",
@@ -420,12 +438,19 @@ def _ninth(f: Facts, height):
                            "Schedule period was not checked. Use minutes (60, FRP 60 min, REI 60) or hours (1 HR)",
                            ubbl.NINTH_CLAUSE, [e.GlobalId for v in unread.values() for e in v],
                            {"by_kind": {k: len(v) for k, v in unread.items()}}))
-    for (storey, kind, need, label, line), els in sorted(short.items(), key=lambda kv: tuple(map(str, kv[0]))):
+    for (storey, kind, need, rule, line, label), els in sorted(short.items(),
+                                                              key=lambda kv: tuple(map(str, kv[0]))):
         worst = min(h for _, h in els)
+        gids = [e.GlobalId for e, _ in els]
+        if rule == "214":
+            out.append(Finding("IFC-FRP", "error",
+                               f"{storey}: {len(els)} {line}(s) below the {need} min by-law 214(1) requires "
+                               f"(lowest {worst} min)", ubbl.WALL_MIN_CLAUSE, gids,
+                               {"required_min": need, "lowest_min": worst, "line": "by-law 214(1)"}))
+            continue
         out.append(Finding("IFC-FRP", "error",
                            f"{storey}: {len(els)} {kind}(s) below the {need} min the Ninth Schedule requires "
-                           f"(lowest {worst} min; {line}; {label})", ubbl.NINTH_CLAUSE,
-                           [e.GlobalId for e, _ in els],
+                           f"(lowest {worst} min; {line}; {label})", ubbl.NINTH_CLAUSE, gids,
                            {"required_min": need, "lowest_min": worst, "line": line, "basis": label}))
     return out
 
@@ -617,6 +642,28 @@ def _fire_doors(f: Facts):
                                f"Door {name}: FRP {dr} min is less than its compartment wall's {wr} min; "
                                "confirm against the Ninth Schedule", "UBBL by-law 162(2), Ninth Schedule",
                                [d.GlobalId, wall.GlobalId]))
+    return out
+
+
+def _door_closers(f: Facts):
+    """By-law 164(1): every fire door (a door with a fire rating of half an hour or more) is
+    self-closing.  Declared False is an error; undeclared doors are listed in one warning."""
+    out, unknown = [], []
+    for d in f.model.by_type("IfcDoor"):
+        r = frp_minutes(_prop(d, "Pset_DoorCommon", "FireRating"))
+        if r is None or r < 30:
+            continue
+        closing = _prop(d, "Pset_DoorCommon", "SelfClosing")
+        if closing is False:
+            out.append(Finding("IFC-DOORCLOSER", "error",
+                               f"Fire door {d.Name or d.GlobalId} ({r} min) is declared not self-closing",
+                               "UBBL by-law 164(1)", [d.GlobalId]))
+        elif closing is None:
+            unknown.append(d)
+    if unknown:
+        out.append(Finding("IFC-DOORCLOSER-DATA", "warning",
+                           f"{len(unknown)} fire door(s) don't say whether they are self-closing "
+                           "(Pset_DoorCommon.SelfClosing)", "UBBL by-law 164(1)", [d.GlobalId for d in unknown]))
     return out
 
 
