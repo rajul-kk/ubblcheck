@@ -53,6 +53,7 @@ Data with no IFC home goes in the custom set `MY_FireSafety`.
 | Separating wall (between buildings) | `IfcWall` · `MY_FireSafety.SeparatingWall` | by-law 214(1)(b) |
 | Fire lift | `Pset_TransportElementElevator.FireFightingLift` | by-law 229(5) |
 | Hydrant, breeching inlet, hose reel, sprinkler | `IfcFireSuppressionTerminal` with a predefined type and a `Tag` | by-law 225, 229–231 |
+| Class of surface spread of flame | `Pset_WallCommon.SurfaceSpreadOfFlame`, `Pset_CoveringCommon.SurfaceSpreadOfFlame` (ceilings: `IfcCovering` CEILING), on the object or its type: 'Class 0' (or 'Class O') to 'Class 4' | by-law 204-206, Eighth Schedule |
 | Smoke vent | Any element named as a smoke vent or extract ("Smoke Vent", "Smoke & Heat Vent", "Smoke Extract Fan", "SHEV", "AOV", "Pelega Asap"); "windowless" means no `IfcWindow` and no `IfcCurtainWall` | by-law 249 |
 | Foam inlet | `IfcFireSuppressionTerminal` USERDEFINED with `ObjectType` FOAMINLET, on the object or its type; or any distribution element, or its type, named as a foam inlet ("Foam Inlet", "salur masuk busa") | by-law 233 |
 | Break glass, bell | `IfcAlarm` BREAKGLASSBUTTON / BELL | by-law 237 |

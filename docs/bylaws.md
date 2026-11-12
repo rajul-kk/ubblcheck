@@ -63,7 +63,9 @@ needs a drawing checklist item to cite it. A by-law the code cites can't be mark
 | 194 | Building with single staircase | checked | — | One exit is a warning, not an error, for domestic and office buildings with the topmost floor at most 12 m (IFC-EXIT-SINGLE); the warning lists conditions (a), (b), (i), (iii) and (iv) to confirm |
 | 195 | Staircases to roof level over 30 m | — | — | Tried and dropped: Revit exports a multi-storey stair as one object on its base storey, so whether a stair reaches the roof can't be read without false alarms |
 | 196–202 | Smoke and protected lobbies, staircase ventilation, pressurisation | — | shown | Locations marked (P08) |
-| 203–212 | Spread of flame, roofs | — | — | Needs surface classes; possible via Pset_*Common.SurfaceSpreadOfFlame |
+| 203 | Restriction of spread of flame (floors exempt; basic material) | — | — | Definition |
+| 204–206 | Classes of surface spread of flame; walls and ceilings by place | checked | — | Eighth Schedule class of the walls along a space and the ceilings over it, by place (stair, corridor or lobby by name, other) and purpose group; sprinklers one class lower (205(3)); occupied basements Class 0 or 1 (205(4)) (GEO-FLAME, warning). The public copy of the schedule prints no rows for groups VII and VIII, which are not checked. Small-area allowances (206(2)-(3)) not judged |
+| 207–212 | Plastic ceilings, roofs | — | — | Material specification; roof designations need test results and boundary distances |
 | 213 | Fire resistance of elements of structure (Ninth Schedule) | checked | shown | IFC-FRP per compartment; drawings P06 |
 | 214 | External and separating walls, minimum periods | checked | shown | Loadbearing external walls 30 min, separating walls (MY_FireSafety.SeparatingWall) 60 min, in IFC-FRP. Non-loadbearing external walls are left alone: (2) frees them where they may be unprotected areas, which needs the boundary |
 | 215 | Height and compartments for fire resistance | — | shown | Compartment sizes are used; part-height separation is not |
