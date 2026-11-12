@@ -26,7 +26,7 @@ from shapely.ops import unary_union
 
 from . import geom, travel, ubbl
 from .findings import Finding
-from .ifccheck import _FLOOR_SLABS, PSET, Facts, _prop, exits_declared, objects
+from .ifccheck import _FLOOR_SLABS, PSET, Facts, _prop, exits_declared, not_floor, objects, storey_exits
 
 ABUT_M = 10.0          # assumption: a face "abuts" access within this distance (not in UBBL)
 ACCESS_WIDTH_M = ubbl.ACCESS_ROAD_MIN_M
@@ -67,14 +67,19 @@ def _z(product, scale) -> float:
 
 
 class Plan:
-    """One storey in plan: spaces, cut walls, doors."""
+    """One storey in plan: floor spaces, cut walls, doors, and its exits.  The exits are the ones
+    ifccheck counts (storey_exits): exit doors, or on a storey with none, the escape stairs coming
+    up to it, reached at their plan outline."""
 
-    def __init__(self, f: Facts, storey, by_storey):
+    def __init__(self, f: Facts, storey, by_storey, exits):
+        """exits: (elements, by stair), this storey's entry of storey_exits(f)."""
         self.storey = storey
         self.z = _z(storey, f.scale)
         cut = self.z + geom.CUT_HEIGHT
         self.spaces = []
         for sp in by_storey["IfcSpace"]:
+            if not_floor(sp):
+                continue
             fp = geom.footprint(geom.mesh(sp))
             if fp is not None and fp.area > 0.05:
                 self.spaces.append((sp, fp))
@@ -85,8 +90,20 @@ class Plan:
             o = geom.door_outline(d)
             if o is not None and not o.is_empty:
                 self.doors.append((d, o))
-        self.exits = [o for d, o in self.doors if _prop(d, "Pset_DoorCommon", "FireExit") is True]
+        elements, self.via_stairs = exits
+        outline = dict((d.id(), o) for d, o in self.doors)
+        self.exit_elements, self.exits_without_plan = [], []
+        for e in elements:
+            o = outline.get(e.id()) if e.is_a("IfcDoor") else geom.outline(e)
+            if o is not None and not o.is_empty:
+                self.exit_elements.append((e, o))
+            else:
+                self.exits_without_plan.append(e)
         self.field = None
+
+    @property
+    def exits(self):
+        return [o for _, o in self.exit_elements]
 
     @property
     def name(self):
@@ -95,7 +112,8 @@ class Plan:
     def solve(self, cell):
         if not self.spaces or not self.exits:
             return None
-        walk = unary_union([p for _, p in self.spaces])
+        # a stair is walkable even where the space over it is a void left out of self.spaces
+        walk = unary_union([p for _, p in self.spaces] + (self.exits if self.via_stairs else []))
         self.field = travel.field(walk, [o for o in self.obstacles if o is not None], self.exits,
                                   [o for _, o in self.doors], cell)
         return self.field
@@ -129,9 +147,16 @@ def _travel(f: Facts, plans, heat_dir, cell):
     for pl in plans:
         if not pl.spaces:
             continue
+        if not pl.exits and pl.exits_without_plan:
+            out.append(Finding("GEO-EXIT-GEOM", "warning",
+                               f"{pl.name}: its exits ({', '.join(e.Name or e.GlobalId for e in pl.exits_without_plan)}) "
+                               "have no plan geometry the checker can read, so no travel distance can be measured",
+                               "UBBL by-law 165", [e.GlobalId for e in pl.exits_without_plan]))
+            continue
         if not pl.exits:
             out.append(Finding("GEO-NOEXIT", "error",
-                               f"{pl.name}: no fire exit door on this storey, so no travel distance can be measured",
+                               f"{pl.name}: no fire exit door or escape stair serves this storey, so no travel distance "
+                               "can be measured",
                                "UBBL by-law 165, 167", [pl.storey.GlobalId]))
             continue
         fld = pl.solve(cell)
@@ -144,6 +169,25 @@ def _travel(f: Facts, plans, heat_dir, cell):
             if r is not None:
                 out += _space_travel_findings(f, f"{pl.name} {sp.Name or sp.GlobalId}", sp, poly, r, fld, lim,
                                               open_plan or _prop(sp, PSET, "OpenPlan") is True)
+    return out
+
+
+def _exit_spacing(f: Facts, plans) -> list[Finding]:
+    """By-law 174(1): where a storey needs two exits, two of them are at least 5 m apart, measured
+    between the nearest edges of the openings.  Not where by-law 194 allows a single staircase."""
+    if ubbl.single_stair_allowed(f.group, f.use, f.top_floor_m):
+        return []
+    out = []
+    for pl in plans:
+        if not pl.spaces or pl.via_stairs or len(pl.exit_elements) < ubbl.MIN_EXITS:
+            continue                # no floor; stairs are not openings; too few exits is IFC-EXIT-COUNT
+        doors = pl.exit_elements
+        widest = max(a.distance(b) for i, (_, a) in enumerate(doors) for _, b in doors[i + 1:])
+        if widest < ubbl.EXIT_SPACING_M:
+            out.append(Finding("GEO-EXIT-SPACING", "error",
+                               f"{pl.name}: the {len(doors)} exit doors are at most {widest:.1f} m apart; "
+                               f"two of them must be at least {ubbl.EXIT_SPACING_M} m apart",
+                               "UBBL by-law 174(1)", [d.GlobalId for d, _ in doors], {"widest_m": widest}))
     return out
 
 
@@ -351,8 +395,10 @@ def check(model: ifcopenshell.file, heat_dir: str | None = None, cell: float = 0
     out = []
     if f.group in ubbl.PURPOSE_GROUPS:
         bys = _by_storey(f)
-        plans = [Plan(f, s, bys[s.id()]) for s in f.storeys]
+        exits = storey_exits(f)
+        plans = [Plan(f, s, bys[s.id()], exits.get(s, ([], False))) for s in f.storeys]
         out += _travel(f, plans, heat_dir, cell)
+        out += _exit_spacing(f, plans)
     out += _access(f)
     out += _groups(f)
     out += _basement(f)

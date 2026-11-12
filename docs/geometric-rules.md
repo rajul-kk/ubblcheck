@@ -57,7 +57,9 @@ A result above the limit but inside that tolerance is reported as a
 | GEO-ROOM | Small room: remote point to room door over 15 m |
 | GEO-DIRECT | Open plan: direct distance over two-thirds of the limit |
 | GEO-NOROUTE | More than 5 % of a space has no route to any exit (missing door, or a door not cut into its wall) |
-| GEO-NOEXIT | An occupied storey with no fire exit door |
+| GEO-NOEXIT | An occupied storey with no exit: no fire exit door, and no escape stair coming up to it. A storey with no exit door is measured to its escape stairs, the same exits IFC-EXIT-COUNT counts |
+| GEO-EXIT-GEOM | A storey's exits have no plan geometry (warning: travel not measured) |
+| GEO-EXIT-SPACING | No two of a storey's exit doors are 5 m apart, edge to edge (by-law 174(1)); skipped where by-law 194 allows one exit |
 | GEO-DECLARED | `MaxTravelDistance` in the model is shorter than the measured distance |
 | GEO-AREA | Declared floor area differs from the space geometry by more than 5 % |
 

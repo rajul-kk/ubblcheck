@@ -50,7 +50,7 @@ needs a drawing checklist item to cite it. A by-law the code cites can't be mark
 | 169–171 | Exit routes, unenclosed openings, horizontal exits | data | — | Data asked for; routes not judged |
 | 172 | Exit signs | data | shown | Drawings P13 |
 | 173 | Exit doors | data | — | Possible: door swing against direction of travel |
-| 174 | Arrangement of storey exits | data | — | Possible: exits remote from each other, from plan geometry |
+| 174 | Arrangement of storey exits | checked | — | (1) two exits at least 5 m apart, edge to edge, on plan (GEO-EXIT-SPACING). (2) where each exit leads, and (3) the services exemption, are not judged |
 | 175 | Occupant load | checked | shown | Seventh Schedule loads; drawings: calculation table (PG2) |
 | 176 | Storey exit width | checked | shown | IFC-EXIT-WIDTH |
 | 177 | Number and width of staircases | checked | shown | Two exits per storey (177(d), IFC-EXIT-COUNT); stair widths and (a)-(c), (e)-(f) not judged |

@@ -4,8 +4,8 @@ import math
 import pytest
 
 import geomodel as G
-from ubblcheck import georules, travel
-from ubblcheck.ifccheck import Facts
+from ubblcheck import geom, georules, travel
+from ubblcheck.ifccheck import Facts, storey_exits
 
 
 def rules(fs):
@@ -16,7 +16,7 @@ def plan(md, cell=0.2):
     f = Facts(md.m)
     bys = georules._by_storey(f)
     st = f.storeys[0]
-    pl = georules.Plan(f, st, bys[st.id()])
+    pl = georules.Plan(f, st, bys[st.id()], storey_exits(f).get(st, ([], False)))
     pl.solve(cell)
     return pl
 
@@ -26,6 +26,19 @@ def one_storey(W, D, exits, **kw):
     st = md.storey("L0", 0.0)
     G.box_floor(md, st, W, D, exits=exits)
     return md, st
+
+
+@pytest.mark.parametrize("group, second, error", [
+    ("V", 5.5, True),       # door edges 2.5 m apart
+    ("V", 8.5, False),      # 6.5 m apart
+    ("IV", 5.5, False),     # single-storey office: by-law 194 needs only one exit
+])
+def test_exits_five_metres_apart(group, second, error):
+    md, _ = one_storey(40, 20, ((0, 2.0), (0, second)), group=group)
+    fs = [x for x in georules.check(md.m) if x.rule == "GEO-EXIT-SPACING"]
+    assert bool(fs) is error
+    if error:
+        assert abs(fs[0].detail["widest_m"] - 2.5) < 0.05 and fs[0].clause == "UBBL by-law 174(1)"
 
 
 def test_open_floor_distance_matches_geometry():
@@ -185,3 +198,48 @@ def test_heatmap(tmp_path):
     georules.check(md.m, heat_dir=str(tmp_path))
     pngs = list(tmp_path.glob("travel-*.png"))
     assert len(pngs) == 1 and pngs[0].stat().st_size > 500
+
+
+def _stair(md, lower, pts, z):
+    """An escape stair the Revit way: an IfcStair with no body of its own, aggregating a flight
+    (modelled here as a slab-shaped part)."""
+    import ifcopenshell.api.aggregate as agg
+    import ifcopenshell.api.root as root
+    st = root.create_entity(md.m, ifc_class="IfcStair", name="ST1")
+    G._ps(md.m, st, "Pset_StairCommon", {"FireExit": True})
+    flight = md.slab(lower, pts, z, name="ST1-flight")
+    agg.assign_object(md.m, products=[flight], relating_object=st)
+    md._contain(st, lower)
+    return st
+
+
+def test_upper_storey_travels_to_its_stair():
+    md = G.Model(group="V")
+    l0, l1 = md.storey("L0", 0.0), md.storey("L1", G.H)
+    G.box_floor(md, l0, 20, 10, exits=((0, 2.0), (0, 18.0)))
+    G.box_floor(md, l1, 20, 10, z=G.H, exits=())
+    stair = _stair(md, l0, G.rect(17, 7, 19, 9.5), 0.0)
+    assert geom.outline(stair).area > 4.5
+    fs = georules.check(md.m)
+    assert not [x for x in fs if x.rule in ("GEO-NOEXIT", "GEO-NOROUTE")], [x.message for x in fs]
+    f = Facts(md.m)
+    up = f.storeys[1]
+    pl = georules.Plan(f, up, georules._by_storey(f)[up.id()], storey_exits(f)[up])
+    assert pl.via_stairs and pl.exit_elements[0][0] == stair
+    r = travel.space_travel(pl.solve(0.2), pl.spaces[0][1])
+    # from the far corner (0.3, 0.3) to the stair's nearest corner (17, 7)
+    assert abs(r.max_m - math.hypot(17 - 0.3, 7 - 0.3)) <= pl.field.tolerance(18.0)
+
+
+def test_exit_without_plan_geometry_is_a_warning():
+    import ifcopenshell.api.root as root
+    md = G.Model(group="V")
+    l0, l1 = md.storey("L0", 0.0), md.storey("L1", G.H)
+    G.box_floor(md, l0, 20, 10, exits=((0, 2.0), (0, 18.0)))
+    G.box_floor(md, l1, 20, 10, z=G.H, exits=())
+    stair = root.create_entity(md.m, ifc_class="IfcStair", name="ST-empty")     # no body, no parts
+    G._ps(md.m, stair, "Pset_StairCommon", {"FireExit": True})
+    md._contain(stair, l0)
+    fs = georules.check(md.m)
+    assert [x.rule for x in fs if x.rule.startswith(("GEO-NOEXIT", "GEO-EXIT-GEOM"))] == ["GEO-EXIT-GEOM"]
+    assert next(x for x in fs if x.rule == "GEO-EXIT-GEOM").where == [stair.GlobalId]
