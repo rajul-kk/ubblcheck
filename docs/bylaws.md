@@ -73,7 +73,8 @@ needs a drawing checklist item to cite it. A by-law the code cites can't be mark
 | 229 | Over 18.3 m: access and fire fighting | checked | shown | IFC-RISER, IFC-FIRELIFT; drawings P14, P17 |
 | 230–231 | Dry and wet rising systems | checked | shown | Dry or wet by height (IFC-RISER, IFC-WETRISER); testing is on site |
 | 232 | Rising systems during construction | — | — | Construction stage |
-| 233–234 | Foam inlets | — | — | Possible: basements and windowless buildings |
+| 233 | Foam inlets, basement boiler and storage rooms | checked | — | Unsprinklered building with a boiler room or store below ground (by name) and no foam inlet modelled (IFC-FOAM-INLET, warning) |
+| 234 | Foam inlets, underground and windowless buildings | — | — | Left to the Fire Authority case by case |
 | 235 | Fixed installations | — | shown | P09 |
 | 236 | Special hazards | — | — | Case by case |
 | 237 | Fire alarms | checked | shown | Through the Tenth Schedule (IFC-TENTH-1, -2); drawings P15, AO3 |

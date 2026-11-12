@@ -418,3 +418,62 @@ def test_rating_parser_and_ids_pattern_agree(label):
     assert in_ids <= (read is not None), label            # whatever the IDS accepts, the checker reads
     if read is not None and read in (30, 60, 90, 120, 180, 240):
         assert in_ids, label                              # and the standard periods it reads, the IDS accepts
+
+
+def _basement_boiler(sprinklered=False, inlet=None, room="Boiler Room", elevation=-4.0):
+    import ifcopenshell.api.aggregate as agg
+    import ifcopenshell.api.root as root
+    import ifcopenshell.api.spatial as spatial
+    import ifcopenshell.api.type as typ
+    m = ifcmodel.office(storeys=2, sprinklered=sprinklered)
+    b = root.create_entity(m, ifc_class="IfcBuildingStorey", name="B1")
+    b.Elevation = elevation
+    agg.assign_object(m, products=[b], relating_object=m.by_type("IfcBuilding")[0])
+    sp = root.create_entity(m, ifc_class="IfcSpace", name="B1-01")
+    sp.LongName = room
+    agg.assign_object(m, products=[sp], relating_object=b)
+    fi = None
+    if inlet == "typed":
+        fi = root.create_entity(m, ifc_class="IfcFireSuppressionTerminal", name="FI1", predefined_type="USERDEFINED")
+        fi.ObjectType = "FOAMINLET"
+    elif inlet in ("named", "tank"):
+        fi = root.create_entity(m, ifc_class="IfcFireSuppressionTerminal",
+                                name="Foam Inlet FI1" if inlet == "named" else "Foam Concentrate Tank")
+    elif inlet == "type-named":         # Revit: the family type carries the name
+        t = root.create_entity(m, ifc_class="IfcFireSuppressionTerminalType", name="Foam Inlet 2-way")
+        fi = root.create_entity(m, ifc_class="IfcFireSuppressionTerminal", name="Fire Suppression Terminal:FI-01")
+        typ.assign_type(m, related_objects=[fi], relating_type=t)
+    if fi is not None:
+        spatial.assign_container(m, products=[fi], relating_structure=m.by_type("IfcSite")[0])
+    return m, sp
+
+
+@pytest.mark.parametrize("sprinklered, inlet, room, elevation, warned", [
+    (False, None, "Boiler Room", -4.0, True),
+    (False, "typed", "Boiler Room", -4.0, False),
+    (False, "named", "Boiler Room", -4.0, False),
+    (False, "type-named", "Boiler Room", -4.0, False),
+    (False, "tank", "Boiler Room", -4.0, True),          # foam equipment that is not an inlet
+    (True, None, "Boiler Room", -4.0, False),
+    (False, None, "Bilik Stor", -4.0, True),
+    (False, None, "Storage", -4.0, True),
+    (False, None, "Convenience Store", -4.0, False),     # a shop, not a storage area
+    (False, None, "Boiler Room", -0.8, True),            # lower ground storey, still below ground
+])
+def test_foam_inlet_for_basement_boiler(write, sprinklered, inlet, room, elevation, warned):
+    m, sp = _basement_boiler(sprinklered, inlet, room, elevation)
+    fs = [x for x in ifccheck.check(write(m)) if x.rule == "IFC-FOAM-INLET"]
+    assert bool(fs) is warned
+    if warned:
+        assert fs[0].where == [sp.GlobalId] and fs[0].clause == "UBBL by-law 233"
+
+
+def test_ifc2x3_user_defined_type():
+    import ifcopenshell
+    import ifcopenshell.guid as guid
+    m = ifcopenshell.file(schema="IFC2X3")
+    t = m.create_entity("IfcFireSuppressionTerminalType", GlobalId=guid.new(), Name="FI",
+                        PredefinedType="USERDEFINED", ElementType="FOAMINLET")
+    fi = m.create_entity("IfcFlowTerminal", GlobalId=guid.new(), Name="FI1")
+    m.create_entity("IfcRelDefinesByType", GlobalId=guid.new(), RelatedObjects=[fi], RelatingType=t)
+    assert ifccheck.objects(m, "IfcFireSuppressionTerminal", ("FOAMINLET",)) == [fi]

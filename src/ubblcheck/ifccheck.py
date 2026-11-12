@@ -95,7 +95,8 @@ def objects(model, cls: str, types) -> list:
         typed = model.by_type(cls + "Type")
     except RuntimeError:
         return []
-    return [e for t in typed if (t.PredefinedType or "") in types for e in uel.get_types(t)]
+    # get_predefined_type reads a USERDEFINED type's ElementType
+    return [e for t in typed if (uel.get_predefined_type(t) or "") in types for e in uel.get_types(t)]
 
 
 _VOID = re.compile(r"open to below|\bvoid\b|terbuka ke bawah|double (height|volume)|upper part of"
@@ -257,6 +258,7 @@ def check_rules(model: ifcopenshell.file) -> list[Finding]:
     out += _systems(f)
     out += _tenth(f, height)
     out += _tall_building_rooms(f, height)
+    out += _foam_inlets(f)
     return out
 
 
@@ -774,6 +776,43 @@ def _tall_building_rooms(f: Facts, height) -> list[Finding]:
                                f"under the {ubbl.FIRE_LOBBY_MIN_M2} m2 minimum", "UBBL by-law 242(a)",
                                [sp.GlobalId], {"area_m2": a}))
     return out
+
+
+# by-law 233: boiler rooms and storage areas below ground
+# ('store' alone is left out: in English it is as often a shop as a storage room)
+_BOILER_OR_STORE = re.compile(r"boiler|dandang|storage|store ?room|\bstores\b|\bstor\b|gudang", re.I)
+_FOAM_INLET = re.compile(r"foam[\s_-]*inlet|inlet[\s_-]*(busa|buih)|(busa|buih)[\s_-]*inlet|salur masuk (busa|buih)", re.I)
+
+
+def _labels(el) -> list[str]:
+    """Name and ObjectType of an element and Name and ElementType of its type object, where given."""
+    t = uel.get_type(el)
+    return [str(x) for x in (el.Name, getattr(el, "ObjectType", None), getattr(t, "Name", None),
+                             getattr(t, "ElementType", None)) if x]
+
+
+def _foam_inlets(f: Facts) -> list[Finding]:
+    """By-law 233: in a building without automatic sprinklers, a boiler room or storage area below
+    ground (below the ground storey) needs a foam inlet.  An inlet is a fire suppression terminal
+    typed FOAMINLET (on itself or its type), or a distribution element named as a foam inlet, on
+    itself or its type.  Any inlet in the model counts: models don't link inlets to the rooms they
+    serve.  A warning: architectural models often leave inlets out."""
+    if f.sprinklered:
+        return []
+    below = [sp for sp in f.model.by_type("IfcSpace")
+             if (st := f.storey_of(sp)) is not None and f.elev(st) < 0 and not not_floor(sp)
+             and named(sp, _BOILER_OR_STORE)]
+    if not below:
+        return []
+    inlets = _terminals(f, "FOAMINLET") or [
+        e for e in f.model.by_type("IfcDistributionElement") if any(_FOAM_INLET.search(x) for x in _labels(e))]
+    if inlets:
+        return []
+    rooms = ", ".join(sp.LongName or sp.Name or sp.GlobalId for sp in below[:6]) + (" ..." if len(below) > 6 else "")
+    return [Finding("IFC-FOAM-INLET", "warning",
+                    f"Boiler room or storage below ground ({rooms}) in a building without automatic sprinklers, "
+                    "and no foam inlet is modelled (IfcFireSuppressionTerminal typed FOAMINLET, or named "
+                    "'foam inlet')", "UBBL by-law 233", [sp.GlobalId for sp in below])]
 
 
 def _terminals(f: Facts, ptype):
