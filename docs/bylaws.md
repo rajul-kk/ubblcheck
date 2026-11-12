@@ -2,8 +2,9 @@
 
 UBBL 1984 Parts VII (fire requirements) and VIII (fire alarms, detection, extinguishment
 and fire fighting) run from by-law 133 to 253. This table says what the checker does with each
-one. `tests/test_bylaws_doc.py` keeps it honest: every by-law the code cites must be listed
-here as covered, and every by-law listed as covered must be cited by the code.
+one. `tests/test_bylaws_doc.py` checks each mark against the code. **checked** needs a rule
+that cites the by-law, **data** needs the IDS pack (`ids_build.py`) to cite it, and **shown**
+needs a drawing checklist item to cite it. A by-law the code cites can't be marked —.
 
 | Mark | Meaning |
 |---|---|
@@ -15,7 +16,7 @@ here as covered, and every by-law listed as covered must be cited by the code.
 | By-law | Subject | IFC model | Drawing set | Notes, or why not |
 |---|---|---|---|---|
 | 133 | Interpretations | — | — | Definitions |
-| 134 | Purpose groups | checked | — | Declared group used everywhere; room names compared with it (GEO-GROUP, GEO-MIXED). Drawings: a form field that selects the items |
+| 134 | Purpose groups | checked | — | Declared group used everywhere; room names compared with it (GEO-GROUP, GEO-MIXED). Drawings: the group is typed into the form, not read from the drawings |
 | 135 | Rules of measurement | checked | shown | Height, floor area and volume measured as the by-law says (IFC-HEIGHT, GEO-AREA) |
 | 136 | Compartment size limits (Fifth Schedule) | checked | shown | IFC-COMP-AREA, IFC-COMP-VOL, sprinkler doubling |
 | 137 | Compartment floors over 30 m | checked | — | IFC-COMP-FLOOR |
@@ -90,7 +91,7 @@ here as covered, and every by-law listed as covered must be cited by the code.
 ## What the table shows
 
 Means of escape and compartmentation, the core of a passive submission, are checked on the
-model. On the drawings they are mostly *shown*; travel distances and ramp gradients written
-on the drawings are read and compared with the limits. The gaps that look worth closing next are listed in
-`goals.md`. The rest need information a model or drawing set doesn't hold (boundaries,
-neighbours, materials) or are about construction, operation and approval.
+model. On the drawings they are mostly *shown*; travel distances written on the drawings are
+read and compared with the limits. Rows noted *Possible* are gaps a model could close. The rest
+need information a model or drawing set doesn't hold (boundaries, neighbours, materials) or are
+about construction, operation and approval.
