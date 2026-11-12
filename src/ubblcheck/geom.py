@@ -10,6 +10,7 @@ from dataclasses import dataclass
 
 import ifcopenshell
 import ifcopenshell.geom
+import ifcopenshell.util.element as uel
 import ifcopenshell.util.placement as uplace
 import ifcopenshell.util.unit as uunit
 import numpy as np
@@ -122,6 +123,19 @@ def location(product) -> np.ndarray | None:
         return None
     mat = uplace.get_local_placement(product.ObjectPlacement)
     return mat[:2, 3] * uunit.calculate_unit_scale(product.file)
+
+
+def outline(product):
+    """Plan outline of a product: its own body, else the union of the parts it is made of, railings
+    left out (Revit exports a stair as an empty IfcStair aggregating flights, landings, stringers and
+    railings; other tools use IfcMember or IfcBuildingElementProxy for the flights)."""
+    fp = footprint(mesh(product))
+    if fp is not None and not fp.is_empty:
+        return fp
+    parts = [footprint(mesh(p)) for p in uel.get_decomposition(product)
+             if not p.is_a("IfcRailing")]
+    parts = [p for p in parts if p is not None and not p.is_empty]
+    return unary_union(parts) if parts else None
 
 
 def door_outline(door):

@@ -151,6 +151,11 @@ class Facts:
         occupied = [s for s in self.above_ground if s in with_spaces]
         self.occupied = occupied if occupied else self.above_ground
 
+    @property
+    def top_floor_m(self) -> float:
+        """Height of the topmost floor above the ground storey (by-law 194: 'top most floor')."""
+        return max((self.elev(s) for s in self.occupied), default=0.0)
+
     def storey_of(self, el):
         c = uel.get_container(el) or uel.get_aggregate(el)
         while c is not None and not c.is_a("IfcBuildingStorey"):
@@ -197,7 +202,7 @@ class Facts:
         row = ubbl.load_row(self.group, _prop(space, PSET, "OccupancyUse"))
         if row is None:
             return None
-        return ubbl.occupant_load(self.floor_area(space) if area is None else area, self.group, row)
+        return ubbl.occupant_load_for_row(self.floor_area(space) if area is None else area, row)
 
     def floor_volume(self, space) -> float | None:
         """Declared volume, else the volume of the space's geometry, else None.  Voids count as 0."""
@@ -568,12 +573,13 @@ def _exits(f: Facts):
         st = f.storey_of(sp)
         if st is None:
             continue
-        load[st.Name] += f.persons(sp) or 0      # an unknown use is reported by _occupancy_uses
-    exits = _storey_exits(f)
-    top = max((f.elev(s) for s in f.occupied), default=0.0)
+        load[st] += f.persons(sp) or 0      # an unknown use is reported by _occupancy_uses
+    exits = storey_exits(f)
+    top = f.top_floor_m
     single_ok = ubbl.single_stair_allowed(f.group, f.use, top)
-    for storey, persons in sorted(load.items()):
-        ds, via_stairs = exits.get(storey, ([], False))
+    for st, persons in sorted(load.items(), key=lambda kv: f.elev(kv[0])):
+        storey = st.Name or st.GlobalId
+        ds, via_stairs = exits.get(st, ([], False))
         gids = [d.GlobalId for d in ds]
         noun = "escape stair" if via_stairs else "exit door"
         if persons > 0 and len(ds) == 1 and single_ok:
@@ -614,8 +620,8 @@ def _occupancy_uses(f: Facts) -> list[Finding]:
                     "UBBL by-law 175, Seventh Schedule", [sp.GlobalId for sp in bad], {"uses": uses})]
 
 
-def _storey_exits(f: Facts) -> dict[str, tuple[list, bool]]:
-    """Each storey's exits, as (elements, by stair).  The exits are the doors flagged
+def storey_exits(f: Facts) -> dict:
+    """Each storey's exits, as {storey: (elements, by stair)}.  The exits are the doors flagged
     Pset_DoorCommon.FireExit.  A storey with none escapes by its escape stairs
     (Pset_StairCommon.FireExit) if it has any (by-law 167): a stair is contained in the storey it
     starts from and serves the next storey up.  A stair up from a basement is not a way out of the
@@ -625,15 +631,15 @@ def _storey_exits(f: Facts) -> dict[str, tuple[list, bool]]:
     for d in f.model.by_type("IfcDoor"):
         st = f.storey_of(d)
         if st is not None and _prop(d, "Pset_DoorCommon", "FireExit") is True:
-            doors[st.Name].append(d)
+            doors[st].append(d)
     above = dict(zip(f.storeys, f.storeys[1:]))
     for s in f.model.by_type("IfcStair"):
         st = f.storey_of(s)
         if st in above and not f.is_basement(st) and _prop(s, "Pset_StairCommon", "FireExit") is True:
-            stairs[above[st].Name].append(s)
-    out = {name: (ds, False) for name, ds in doors.items()}
-    for name, ss in stairs.items():
-        out.setdefault(name, (ss, True))
+            stairs[above[st]].append(s)
+    out = {st: (ds, False) for st, ds in doors.items()}
+    for st, ss in stairs.items():
+        out.setdefault(st, (ss, True))
     return out
 
 

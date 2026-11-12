@@ -185,12 +185,17 @@ def load_row(group: str | None, use: str | None = None) -> str | None:
     return key if key in OCCUPANT_LOAD else None
 
 
-def occupant_load(area_m2: float, group: str, use: str | None = None) -> int:
-    key = load_row(group, use)
-    if key is None:
-        raise KeyError(f"no occupant load factor for {group}/{use}")
-    per, _ = OCCUPANT_LOAD[key]
+def occupant_load_for_row(area_m2: float, row: str) -> int:
+    """Persons in `area_m2` at the load factor of a row from load_row()."""
+    per, _ = OCCUPANT_LOAD[row]
     return math.ceil(area_m2 / per)
+
+
+def occupant_load(area_m2: float, group: str, use: str | None = None) -> int:
+    row = load_row(group, use)
+    if row is None:
+        raise KeyError(f"no occupant load factor for {group}/{use}")
+    return occupant_load_for_row(area_m2, row)
 
 
 def exit_units(persons: int, group: str, kind: str = "door", use: str | None = None) -> int:
@@ -230,6 +235,7 @@ DIRECT_DISTANCE_FRACTION = 2 / 3    # by-law 165(1)
 ROOM_TRAVEL_M = 15                  # by-law 165(3)
 FIRE_DOOR_FRP_MIN = (30, 60, 120, 240)  # minutes, by-law 162-163 and Ninth Schedule
 MIN_EXITS = 2                        # by-law 177(d)
+EXIT_SPACING_M = 5                   # by-law 174(1): between the nearest edges of the openings
 SINGLE_STAIR_TOP_M = 12              # by-law 194: topmost floor at most this high
 SINGLE_STAIR_CONDITIONS = (
     "every element of structure has at least 1 hour FRP (a)",
