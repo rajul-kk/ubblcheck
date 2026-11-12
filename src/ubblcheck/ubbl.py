@@ -300,6 +300,10 @@ _NINTH_2 = [
     ("VIII", 500, 0.5), ("VIII", 1000, 1.0), ("VIII", 3000, 2.0), ("VIII", INF, 4.0),
 ]
 NINTH_CLAUSE = "UBBL by-law 213, 216, Ninth Schedule"
+WALL_MIN_CLAUSE = "UBBL by-law 214(1)"
+EXTERNAL_WALL_MIN = 30      # by-law 214(1)(a); 214(2) frees a non-loadbearing external wall that may be an
+                            # unprotected area, which needs the boundary, so only loadbearing ones are held to it
+SEPARATING_WALL_MIN = 60    # by-law 214(1)(b)
 
 
 @dataclass(frozen=True)

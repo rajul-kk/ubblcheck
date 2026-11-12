@@ -41,7 +41,7 @@ here as covered, and every by-law listed as covered must be cited by the code.
 | 161 | Fire-stopping | — | — | Construction detail |
 | 162 | Fire doors in compartment and separating walls | checked | shown | IFC-FIREDOOR, IFC-FIREDOOR-WALL; drawings P04 |
 | 163 | Half-hour and one-hour doors | data | shown | Rating format (MY-P12); drawings P04 |
-| 164 | Door closers | — | shown | Drawings P04. Possible in IFC: Pset_DoorCommon.SelfClosing |
+| 164 | Door closers | checked | shown | Fire doors self-closing (IFC-DOORCLOSER, Pset_DoorCommon.SelfClosing); hold-open devices and closing sequence, (2) and (3), not judged; drawings P04 |
 | 165 | Travel distance | checked | checked | Declared (IFC-TRAVEL) and computed on plan (GEO-TRAVEL, GEO-DIRECT, GEO-ROOM); drawings PDF-TRAVEL, PDF-DEADEND |
 | 166 | Exits accessible at all times | — | — | Operation |
 | 167 | Storey exits | checked | shown | Exit doors (MY-P10); an upper storey with none escapes by an escape stair from the storey below. GEO-NOEXIT; drawings P03 |
@@ -57,11 +57,11 @@ here as covered, and every by-law listed as covered must be cited by the code.
 | 189–191 | Enclosure of escape routes, external stairs, adjacent openings | — | — | Construction detail |
 | 192–193 | Moving walks, power-operated doors | — | — | Rare; not modelled |
 | 194 | Building with single staircase | checked | — | One exit is a warning, not an error, for domestic and office buildings with the topmost floor at most 12 m (IFC-EXIT-SINGLE); the warning lists conditions (a), (b), (i), (iii) and (iv) to confirm |
-| 195 | Staircases to roof level over 30 m | — | — | Possible: stair reaching the top storey |
+| 195 | Staircases to roof level over 30 m | — | — | Tried and dropped: Revit exports a multi-storey stair as one object on its base storey, so whether a stair reaches the roof can't be read without false alarms |
 | 196–202 | Smoke and protected lobbies, staircase ventilation, pressurisation | — | shown | Locations marked (P08) |
 | 203–212 | Spread of flame, roofs | — | — | Needs surface classes; possible via Pset_*Common.SurfaceSpreadOfFlame |
 | 213 | Fire resistance of elements of structure (Ninth Schedule) | checked | shown | IFC-FRP per compartment; drawings P06 |
-| 214 | External and separating walls, minimum periods | — | shown | Possible: external walls 30 min, separating walls 60 min |
+| 214 | External and separating walls, minimum periods | checked | shown | Loadbearing external walls 30 min, separating walls (MY_FireSafety.SeparatingWall) 60 min, in IFC-FRP. Non-loadbearing external walls are left alone: (2) frees them where they may be unprotected areas, which needs the boundary |
 | 215 | Height and compartments for fire resistance | — | shown | Compartment sizes are used; part-height separation is not |
 | 216 | Single-storey buildings; elements in several compartments | checked | shown | (1) exemptions (IFC-FRP-SINGLE); (2) strictest compartment wins |
 | 217–224 | Structural members, flats, floors, capacity, tests, deemed-to-satisfy | — | shown | Cited by the fire resistance note item (P06) |

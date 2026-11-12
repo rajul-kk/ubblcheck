@@ -310,3 +310,38 @@ def test_roof_space_is_not_floor():
     for name, expect in [("Roof", True), ("Attic space", True), ("Roof garden", False), ("Roof terrace", False)]:
         sp = m.createIfcSpace(Name=name)
         assert ifccheck.not_floor(sp) is expect, name
+
+
+@pytest.mark.parametrize("closing, rule, n", [(True, None, 0), (False, "IFC-DOORCLOSER", 4),
+                                              (None, "IFC-DOORCLOSER-DATA", 1)])
+def test_fire_doors_self_close(write, closing, rule, n):
+    r = rules(ifccheck.check(write(ifcmodel.office(self_closing=closing))))
+    assert r["IFC-DOORCLOSER"] + r["IFC-DOORCLOSER-DATA"] == n
+    if rule:
+        assert r[rule] == n
+
+
+def _wall(m, name, rating, **props):
+    import ifcopenshell.api.root as root
+    import ifcopenshell.api.spatial as spatial
+    w = root.create_entity(m, ifc_class="IfcWall", name=name)
+    common = {"FireRating": rating, **{k: v for k, v in props.items() if k != "SeparatingWall"}}
+    ifcmodel._ps(m, w, "Pset_WallCommon", common)
+    if "SeparatingWall" in props:
+        ifcmodel._ps(m, w, "MY_FireSafety", {"SeparatingWall": props["SeparatingWall"]})
+    spatial.assign_container(m, products=[w], relating_structure=m.by_type("IfcBuildingStorey")[0])
+    return w
+
+
+def test_external_and_separating_wall_minimums(write):
+    m = ifcmodel.office(storeys=1, space_area=200)       # single storey: no Ninth period for internal walls
+    ext = _wall(m, "EXT", "15", IsExternal=True, LoadBearing=True)
+    _wall(m, "EXT-NLB", "15", IsExternal=True, LoadBearing=False)   # may be an unprotected area: 214(2)
+    sep = _wall(m, "SEP", "30", SeparatingWall=True)
+    _wall(m, "INT", "0", LoadBearing=True)                           # exempt, by-law 216(1)
+    fs = [f for f in ifccheck.check(write(m)) if f.rule == "IFC-FRP"]
+    by = {tuple(f.where): f for f in fs}
+    assert set(by) == {(ext.GlobalId,), (sep.GlobalId,)}, [f.message for f in fs]
+    assert by[(ext.GlobalId,)].detail["required_min"] == 30     # Ninth Part 2 and 214(1)(a) agree
+    assert by[(sep.GlobalId,)].detail["required_min"] == 60
+    assert by[(sep.GlobalId,)].clause == "UBBL by-law 214(1)"

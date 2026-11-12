@@ -6,8 +6,10 @@ MY_FireSafety,CompartmentId,String,Zone,MY_FireSafety,IfcLabel,By-law 136
 MY_FireSafety,MaxTravelDistance,Length,Zone,MY_FireSafety,IfcLengthMeasure,By-law 165
 MY_FireSafety,DeadEndDistance,Length,Zone,MY_FireSafety,IfcLengthMeasure,Seventh Schedule
 MY_FireSafety,OccupancyUse,String,Zone,MY_FireSafety,IfcLabel,By-law 175
+MY_FireSafety,SeparatingWall,Boolean,Wall,MY_FireSafety,IfcBoolean,By-law 214(1)(b)
 (built-in IFC),Compartmentation,Boolean,"Wall, slab",Pset_WallCommon / Pset_SlabCommon,IfcBoolean,By-law 148
 (built-in IFC),FireRating,String,"Wall, slab, door",Pset_*Common,IfcLabel,"By-law 162, Ninth Schedule"
+(built-in IFC),SelfClosing,Boolean,Door,Pset_DoorCommon,IfcBoolean,By-law 164
 (built-in IFC),FireExit,Boolean,"Door, stair",Pset_DoorCommon / Pset_StairCommon,IfcBoolean,By-law 167-177
 (built-in IFC),SprinklerProtectionAutomatic,Boolean,Building,Pset_BuildingCommon,IfcBoolean,By-law 136
 (built-in IFC),FireFightingLift,Boolean,Lift (object),Pset_TransportElementElevator,IfcBoolean,By-law 229(5)

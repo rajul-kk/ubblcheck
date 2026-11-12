@@ -47,6 +47,9 @@ Data with no IFC home goes in the custom set `MY_FireSafety`.
 | Compartment wall / floor | `Pset_WallCommon` / `Pset_SlabCommon` `.Compartmentation`, `.FireRating` | by-law 148, Ninth Schedule |
 | Fire exit, exit width | `Pset_DoorCommon.FireExit`, `IfcDoor.OverallWidth` | by-law 167–177 |
 | Escape stair | `Pset_StairCommon.FireExit` | by-law 168 |
+| Self-closing fire door | `Pset_DoorCommon.SelfClosing` | by-law 164 |
+| External, loadbearing wall | `Pset_WallCommon.IsExternal`, `.LoadBearing` (exported by Revit and ArchiCAD) | by-law 214(1)(a) |
+| Separating wall (between buildings) | `IfcWall` · `MY_FireSafety.SeparatingWall` | by-law 214(1)(b) |
 | Fire lift | `Pset_TransportElementElevator.FireFightingLift` | by-law 229(5) |
 | Hydrant, breeching inlet, hose reel, sprinkler | `IfcFireSuppressionTerminal` with a predefined type and a `Tag` | by-law 225, 229–231 |
 | Break glass, bell | `IfcAlarm` BREAKGLASSBUTTON / BELL | by-law 237 |
@@ -70,6 +73,8 @@ passive and active sets.
 | IFC-EXIT-WIDTH | Occupant load against units of 550 mm exit width | by-law 175–176 |
 | IFC-COMP-FLOOR | In buildings over 30 m, floors more than 9 m up are compartment floors | by-law 137 |
 | IFC-FIREDOOR | A door in a compartment wall has an FRP of at least 30 min, and is warned if weaker than the wall | by-law 162 |
+| IFC-DOORCLOSER | No door rated 30 min or more is declared not self-closing; one warning lists the fire doors that don't say | by-law 164(1) |
+| IFC-FRP | Elements of structure against the Ninth Schedule; loadbearing external walls at least 30 min and separating walls at least 60 min whatever the line | by-law 213, 214(1), 216 |
 | IFC-RISER, IFC-FIRELIFT | A topmost floor over 18.3 m needs a rising system and a fire lift | by-law 229–231 |
 
 ## Limits and open points

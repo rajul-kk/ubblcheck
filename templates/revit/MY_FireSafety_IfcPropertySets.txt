@@ -16,6 +16,7 @@ PropertySet:	MY_FireSafety	I	IfcSpace
 	OccupancyUse	Label
 PropertySet:	MY_FireSafety	I	IfcWall,IfcSlab,IfcColumn,IfcBeam
 	CompartmentId	Label
+	SeparatingWall	Boolean
 PropertySet:	Pset_BuildingCommon	I	IfcBuilding
 	SprinklerProtectionAutomatic	Boolean
 PropertySet:	Pset_WallCommon	I	IfcWall
@@ -26,6 +27,7 @@ PropertySet:	Pset_SlabCommon	I	IfcSlab
 	FireRating	Label	Fire Rating
 PropertySet:	Pset_DoorCommon	I	IfcDoor
 	FireExit	Boolean
+	SelfClosing	Boolean
 	FireRating	Label	Fire Rating
 PropertySet:	Pset_StairCommon	I	IfcStair
 	FireExit	Boolean

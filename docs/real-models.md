@@ -39,9 +39,10 @@ The models are not kept in the repository.
 
 Every model runs. The remaining errors are the IDS pack reporting missing `MY_FireSafety` and
 `Pset_*` data, which is correct: a Bomba model must carry it. Once annotated, the only rule
-errors are two IFC-COMP-AREA findings on the dental clinic. Its floors are about 2,400 m²,
-which is over the 2,000 m² limit for a Group II building at that height, so they are true for
-the classification given. The other findings are warnings that ask for data (fire ratings,
+error is one IFC-COMP-AREA finding on the dental clinic. Its first floor is about 2,450 m²,
+over the 2,000 m² limit for a Group II building at that height, so it is true for the
+classification given. (A second one, on the floor above, went away once Revit rooms named
+"ROOF", drawn over the flat roofs, stopped counting as floor area.) The other findings are warnings that ask for data (fire ratings,
 fire exits, fire appliance access, volumes) or name active systems that an architectural
 model doesn't contain.
 

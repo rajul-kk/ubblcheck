@@ -18,3 +18,5 @@ PARAM	bcc0bc2b-d1a4-5095-b123-83882305cf18	Compartmentation	YESNO		1	1	Wall or s
 PARAM	6c64c553-ed14-50b1-afa0-c1e065a94396	FireExit	YESNO		1	1	Door or stair is a fire exit (maps to Pset_DoorCommon / Pset_StairCommon).	1	0
 PARAM	8f66d25f-832c-5f90-a1bb-1477d37208b5	SprinklerProtectionAutomatic	YESNO		1	1	Building has an automatic sprinkler installation (maps to Pset_BuildingCommon).	1	0
 PARAM	1116b260-6e24-53d9-bf3a-4fd0cb8adb67	FireFightingLift	YESNO		1	1	Lift is a fire lift (maps to Pset_TransportElementElevator).	1	0
+PARAM	e06ac0ca-d475-53c1-8eff-ad818c4ad70f	SeparatingWall	YESNO		1	1	Wall separates this building from another (by-law 214(1)(b): at least 1 hour).	1	0
+PARAM	e6ea76a3-ea50-5877-bb6e-759b0c8fac18	SelfClosing	YESNO		1	1	Fire door has an automatic closer (by-law 164; maps to Pset_DoorCommon).	1	0
