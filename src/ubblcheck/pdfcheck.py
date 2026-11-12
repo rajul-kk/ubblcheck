@@ -41,7 +41,6 @@ SETS = ("passive", "active")
 NUMBER_FIELDS = {"top_floor_m": "topmost floor height", "volume_m3": "building volume"}   # warned when blank
 TENTH_FIELDS = {"storeys": "number of storeys", "floor_area_m2": "largest floor area",
                 "gross_area_m2": "gross floor area", "rooms": "number of rooms"}   # asked for when a line needs them
-_NO_GENERAL_LINE = {"VII"}   # Tenth Schedule uses the Fire Department decides case by case: check every item
 _TENTH_FIELD = {"storeys": "storeys", "height_m": "top_floor_m", "floor_area_m2": "floor_area_m2",
                 "total_area_m2": "gross_area_m2", "volume_m3": "volume_m3", "rooms": "rooms"}
 _YES = {"yes", "y", "true", "1", "ya"}
@@ -121,7 +120,7 @@ class Form:
         if code == "A" and self.sprinklered:
             return True
         look = self.tenth()
-        if look is None or not look.decided or look.use in _NO_GENERAL_LINE:
+        if look is None or not look.decided or look.row.case_by_case:
             return True
         return look.row.requires(code)
 

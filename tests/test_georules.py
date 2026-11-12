@@ -1,22 +1,20 @@
 import collections
 import math
+import os
 
 import pytest
 
 import geomodel as G
-from ubblcheck import geom, georules, travel
-from ubblcheck.ifccheck import Facts, storey_exits
+from ubblcheck import geom, georules, rooms, travel
+from ubblcheck.model import Facts
 
 
 def rules(fs):
     return collections.Counter(f.rule for f in fs)
 
 
-def plan(md, cell=0.2):
-    f = Facts(md.m)
-    bys = georules._by_storey(f)
-    st = f.storeys[0]
-    pl = georules.Plan(f, st, bys[st.id()], storey_exits(f).get(st, ([], False)))
+def plan(md, cell=0.2, storey=0):
+    pl = georules.plans(Facts(md.m))[storey]
     pl.solve(cell)
     return pl
 
@@ -161,9 +159,7 @@ def test_narrow_access_and_far_hydrant():
                                         ("Male toilet", None), ("Ward 4B", "II"), ("Hallway", None),
                                         ("Entry hall", None), ("Foyer", None), ("Multi-purpose hall", "VII")])
 def test_use_words(name, group):
-    class S:
-        Name, LongName, ObjectType = name, None, None
-    assert georules.use_group(S) == group
+    assert rooms.use_group(name) == group
 
 
 def test_declared_group_contradicted_and_mixed_compartment():
@@ -195,9 +191,16 @@ def test_basement_floor_must_be_compartment():
 
 def test_heatmap(tmp_path):
     md, _ = one_storey(30, 15, ((0, 2.0),))
-    georules.check(md.m, heat_dir=str(tmp_path))
-    pngs = list(tmp_path.glob("travel-*.png"))
-    assert len(pngs) == 1 and pngs[0].stat().st_size > 500
+    maps = {}
+    georules.check(md.m, heat_dir=str(tmp_path), heatmaps=maps)
+    assert list(maps) == ["L0"] and os.path.getsize(maps["L0"]) > 500
+    # storeys whose names are the same, or clean up to the same file name, keep a heatmap each
+    md = G.Model()
+    for i, name in enumerate(("L1/A", "L1 A", "L1 A")):
+        G.box_floor(md, md.storey(name, i * G.H), 20, 10, z=i * G.H, exits=((0, 2.0),))
+    maps = {}
+    georules.check(md.m, heat_dir=str(tmp_path / "dup"), heatmaps=maps)
+    assert len(maps) == 3 and len(set(maps.values())) == 3, maps
 
 
 def _stair(md, lower, pts, z):
@@ -222,11 +225,9 @@ def test_upper_storey_travels_to_its_stair():
     assert geom.outline(stair).area > 4.5
     fs = georules.check(md.m)
     assert not [x for x in fs if x.rule in ("GEO-NOEXIT", "GEO-NOROUTE")], [x.message for x in fs]
-    f = Facts(md.m)
-    up = f.storeys[1]
-    pl = georules.Plan(f, up, georules._by_storey(f)[up.id()], storey_exits(f)[up])
+    pl = plan(md, storey=1)
     assert pl.via_stairs and pl.exit_elements[0][0] == stair
-    r = travel.space_travel(pl.solve(0.2), pl.spaces[0][1])
+    r = travel.space_travel(pl.field, pl.spaces[0][1])
     # from the far corner (0.3, 0.3) to the stair's nearest corner (17, 7)
     assert abs(r.max_m - math.hypot(17 - 0.3, 7 - 0.3)) <= pl.field.tolerance(18.0)
 
@@ -245,7 +246,8 @@ def test_exit_without_plan_geometry_is_a_warning():
     assert next(x for x in fs if x.rule == "GEO-EXIT-GEOM").where == [stair.GlobalId]
 
 
-def _risk_floor(door="60", wall_ratings=("120",) * 4, own_walls=True, partition=False):
+def _risk_floor(door="60", wall_ratings=("120",) * 4, own_walls=True, partition=False, thick_partition=False,
+                door_geometry=True):
     """A shop floor with a 4 x 4 m boiler room in the middle, walled and doored as given."""
     import ifcopenshell.api.pset as pset
     import ifcopenshell.util.element as ue
@@ -262,9 +264,14 @@ def _risk_floor(door="60", wall_ratings=("120",) * 4, own_walls=True, partition=
             rate(w, "Pset_WallCommon", r)
         named["door"] = md.door(st, walls[0], 2.0, name="BR-D")
         rate(named["door"], "Pset_DoorCommon", door)
+        if not door_geometry:           # a door the geometry kernel can't read: still in its wall
+            named["door"].Representation = None
+            named["door"].FillsVoids[0].RelatingOpeningElement.Representation = None
         named["walls"] = walls
     if partition:       # an unrated corridor partition butting against the room's east wall
         named["partition"] = md.wall(st, (12.1, 5.0), (16.0, 5.0), 0.0, name="P1")
+    if thick_partition:  # a 0.6 m masonry wall butting on end-first
+        named["partition"] = md.wall(st, (12.1, 5.0), (16.0, 5.0), 0.0, name="P2", thickness=0.6)
     named["room"] = md.space(st, G.rect(8.1, 3.1, 11.9, 6.9), 0.0, "B01", long_name="Boiler Room")
     return [x for x in georules.check(md.m) if x.rule == "GEO-RISK-ROOM"], named
 
@@ -276,6 +283,8 @@ def test_risk_room_walled_off_passes():
     assert fs == []
     fs, _ = _risk_floor(partition=True)                 # a partition butting on is not an enclosing wall
     assert fs == []
+    fs, _ = _risk_floor(thick_partition=True)           # nor is a thick one
+    assert fs == []
 
 
 def test_risk_room_with_weak_door_or_wall():
@@ -284,6 +293,11 @@ def test_risk_room_with_weak_door_or_wall():
     assert "unrated or unreadable" in fs[0].message and fs[0].clause == "UBBL by-law 139"
     fs, n = _risk_floor(wall_ratings=("120", "30", "120", "120"))
     assert [x.where for x in fs] == [[n["room"].GlobalId, n["walls"][1].GlobalId]] and "30 min (needs 60)" in fs[0].message
+
+
+def test_risk_room_door_without_geometry_is_still_checked():
+    fs, n = _risk_floor(door=None, door_geometry=False)
+    assert [x.where for x in fs] == [[n["room"].GlobalId, n["door"].GlobalId]]
 
 
 def test_risk_room_with_no_walls_is_reported():

@@ -73,13 +73,13 @@ class Model:
         self._contain(sl, st)
         return sl
 
-    def wall(self, st, a, b, z, name="W"):
+    def wall(self, st, a, b, z, name="W", thickness=T):
         (x1, y1), (x2, y2) = a, b
         L = math.hypot(x2 - x1, y2 - y1)
         ang = math.atan2(y2 - y1, x2 - x1)
         w = root.create_entity(self.m, ifc_class="IfcWall", name=name)
         geo.assign_representation(self.m, product=w, representation=geo.add_wall_representation(
-            self.m, context=self.body, length=L, height=H, thickness=T, offset=-T / 2))
+            self.m, context=self.body, length=L, height=H, thickness=thickness, offset=-thickness / 2))
         geo.edit_object_placement(self.m, product=w, matrix=_mat(x1, y1, z, ang))
         _ps(self.m, w, "Pset_WallCommon", {"Compartmentation": False})
         self._contain(w, st)

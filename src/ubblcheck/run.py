@@ -21,7 +21,7 @@ class Run:
     findings: list
     meta: dict
     files: dict = field(default_factory=dict)      # role -> path: json, report, bcf
-    heatmaps: list = field(default_factory=list)   # paths of travel-distance PNGs
+    heatmaps: dict = field(default_factory=dict)   # storey name -> travel-distance PNG
 
     @property
     def summary(self) -> dict:
@@ -49,16 +49,15 @@ def ifc(path: str, out: str, ids_paths: list[str] | None = None, rules: bool = T
     model = ifcopenshell.open(path)
     fs = ifccheck.check_model(model, ids_paths, rules=rules)
     heat_dir = os.path.join(out, "heatmaps") if heatmaps and rules and geometry else None
+    maps: dict = {}
     if rules and geometry:
         from . import georules
-        fs += georules.check(model, heat_dir=heat_dir, cell=cell)
+        fs += georules.check(model, heat_dir=heat_dir, cell=cell, heatmaps=maps)
     stem = stem or os.path.splitext(os.path.basename(path))[0]
-    r = Run("ifc", stem, fs, {"project": stem, "model": os.path.basename(path)})
+    r = Run("ifc", stem, fs, {"project": stem, "model": os.path.basename(path)}, heatmaps=maps)
     os.makedirs(out, exist_ok=True)
     r.files["bcf"] = os.path.join(out, stem + ".bcf")
     fnd.to_bcf(fs, r.files["bcf"])
-    if heat_dir and os.path.isdir(heat_dir):
-        r.heatmaps = sorted(os.path.join(heat_dir, n) for n in os.listdir(heat_dir) if n.endswith(".png"))
     return _write(r, out)
 
 

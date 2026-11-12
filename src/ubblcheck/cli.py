@@ -38,7 +38,7 @@ def _report(r) -> int:
     for role in ("bcf", "json", "report"):
         if role in r.files:
             print(f"  {r.files[role]}")
-    for p in r.heatmaps:
+    for p in r.heatmaps.values():
         print(f"  {p}")
     return r.exit_code
 

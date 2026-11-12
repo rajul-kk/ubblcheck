@@ -1,11 +1,12 @@
 import collections
+import json
 import zipfile
 
 import pytest
 from ifctester import ids
 
 import ifcmodel
-from ubblcheck import findings, ids_build, ifccheck
+from ubblcheck import findings, ids_build, ifccheck, model, ratings, rooms
 
 
 @pytest.fixture
@@ -34,16 +35,20 @@ def test_compliant_model_is_clean(write):
     assert ifccheck.check(write(ifcmodel.office())) == []
 
 
-def test_frp_parsing():
-    assert ifccheck.frp_minutes("60") == 60
-    assert ifccheck.frp_minutes("FRP 120 min") == 120
-    assert ifccheck.frp_minutes("1 HR") == 60
-    assert ifccheck.frp_minutes("1/2 hour") == 30
-    assert ifccheck.frp_minutes("fire door") is None
-    assert ifccheck.frp_minutes("REI 120") == 120
-    assert ifccheck.frp_minutes("EI 60") == 60
-    assert ifccheck.frp_minutes("120 minutes") == 120
-    assert ifccheck.frp_minutes("2 HOURS") == 120
+@pytest.mark.parametrize("label, minutes, in_ids", [
+    ("60", 60, True), ("FRP 120 min", 120, True), ("REI 120", 120, True), ("EI 60", 60, True),
+    ("FD60", 60, True), ("FD 30", 30, True), ("FRD60", 60, True), ("120 minutes", 120, True),
+    ("1 HR", 60, True), ("2 HR FRP", 120, True), ("1/2 hour", 30, True), ("1.5 hrs", 90, True),
+    ("2 HOURS", 120, False),            # read, but the IDS pack asks for one of its spellings
+    ("45", 45, False),                  # not a standard period
+    ("fire door", None, False), ("FD", None, False), ("60 FRP", None, False), ("one hour", None, False),
+    ("", None, False),
+])
+def test_fire_ratings(label, minutes, in_ids):
+    """How the checker reads a FireRating, and whether the IDS pack accepts it."""
+    import re
+    assert ratings.frp_minutes(label) == minutes
+    assert (re.fullmatch(ids_build.FRP_PATTERN, label) is not None) is in_ids
 
 
 def test_ids_flags_missing_data(write):
@@ -102,6 +107,9 @@ def test_bcf_and_json_output(write, tmp_path):
         assert any(n.endswith("viewpoint.bcfv") for n in names)
         assert b"162" in z.read(next(n for n in names if n.endswith("markup.bcf")))
     findings.to_json(fs, str(tmp_path / "f.json"), {"file": "m.ifc"})
+    doc = json.loads((tmp_path / "f.json").read_text(encoding="utf-8"))
+    assert doc["meta"] == {"file": "m.ifc"} and doc["summary"] == findings.summary(fs)
+    assert [f["rule"] for f in doc["findings"]] == [f.rule for f in fs]
 
 
 def test_area_and_volume_quantities_use_their_own_units(write):
@@ -211,9 +219,9 @@ def test_fire_objects_found_through_their_type_in_ifc2x3():
                         PredefinedType="HOSEREEL")
     hr = m.create_entity("IfcFlowTerminal", GlobalId=guid.new(), Name="HR1")
     m.create_entity("IfcRelDefinesByType", GlobalId=guid.new(), RelatedObjects=[hr], RelatingType=t)
-    assert ifccheck.objects(m, "IfcFireSuppressionTerminal", ("HOSEREEL",)) == [hr]
-    assert ifccheck.objects(m, "IfcFireSuppressionTerminal", ("FIREHYDRANT",)) == []
-    assert ifccheck.objects(m, "IfcSensor", ("SMOKESENSOR",)) == []
+    assert model.objects(m, "IfcFireSuppressionTerminal", ("HOSEREEL",)) == [hr]
+    assert model.objects(m, "IfcFireSuppressionTerminal", ("FIREHYDRANT",)) == []
+    assert model.objects(m, "IfcSensor", ("SMOKESENSOR",)) == []
 
 
 def test_ifc4_type_object_supplies_the_predefined_type():
@@ -225,7 +233,7 @@ def test_ifc4_type_object_supplies_the_predefined_type():
     sd = root.create_entity(m, ifc_class="IfcSensor", name="SD1")
     typ.assign_type(m, related_objects=[sd], relating_type=t)
     spatial.assign_container(m, products=[sd], relating_structure=m.by_type("IfcBuildingStorey")[0])
-    assert ifccheck.objects(m, "IfcSensor", ("SMOKESENSOR", "HEATSENSOR")) == [sd]
+    assert model.objects(m, "IfcSensor", ("SMOKESENSOR", "HEATSENSOR")) == [sd]
 
 
 def test_undeclared_exits_are_one_warning_not_an_error_per_storey():
@@ -243,12 +251,10 @@ def test_voids_and_gross_area_zones_are_not_floor_area():
     m = ifcmodel.office(storeys=1, space_area=400.0)
     sp = m.by_type("IfcSpace")
     sp[0].LongName = "Open to below"
-    f = ifccheck.Facts(m)
+    f = model.Facts(m)
     assert f.floor_area(sp[0]) == 0.0 and f.floor_area(sp[1]) == 400.0 and f.floor_volume(sp[0]) == 0.0
     sp[0].LongName, sp[0].PredefinedType = "Level 1 GFA", "GFA"
-    assert ifccheck.Facts(m).floor_area(sp[0]) == 0.0
-    assert not ifccheck.not_floor(type("S", (), {"Name": "Avoid store", "LongName": None})())
-    assert ifccheck.not_floor(type("S", (), {"Name": "V1", "LongName": "Void"})())
+    assert model.Facts(m).floor_area(sp[0]) == 0.0
 
 
 def test_single_storey_frame_is_exempt_but_compartment_walls_are_not():
@@ -288,7 +294,7 @@ def test_upper_storey_escapes_by_stair(write):
     import ifcopenshell.api.pset as pset
     import ifcopenshell.util.element as ue
     m = ifcmodel.office(storeys=3, exits_per_storey=1, space_area=50)
-    f = ifccheck.Facts(m)
+    f = model.Facts(m)
     for d in m.by_type("IfcDoor"):
         if f.storey_of(d).Name != "L0":      # upper storeys: the door is not an exit, the stair is
             pset.edit_pset(m, pset=m.by_id(ue.get_psets(d)["Pset_DoorCommon"]["id"]), properties={"FireExit": False})
@@ -304,12 +310,14 @@ def test_upper_storey_escapes_by_stair(write):
     assert rules(fs)["IFC-EXIT-COUNT"] == 4
 
 
-def test_roof_space_is_not_floor():
+@pytest.mark.parametrize("name, void", [("Roof", True), ("Attic space", True), ("Roof garden", False),
+                                        ("Roof terrace", False), ("Void", True), ("Avoid store", False),
+                                        ("Open to below", True)])
+def test_spaces_that_are_not_floor(name, void):
     import ifcopenshell
-    m = ifcopenshell.file(schema="IFC4")
-    for name, expect in [("Roof", True), ("Attic space", True), ("Roof garden", False), ("Roof terrace", False)]:
-        sp = m.createIfcSpace(Name=name)
-        assert ifccheck.not_floor(sp) is expect, name
+    m = ifcopenshell.file(schema="IFC4")       # kept: an entity dies with its file
+    sp = m.createIfcSpace(Name="01", LongName=name)
+    assert model.not_floor(sp) is void, name
 
 
 @pytest.mark.parametrize("closing, rule, n", [(True, None, 0), (False, "IFC-DOORCLOSER", 4),
@@ -356,7 +364,7 @@ def test_unknown_occupancy_use_is_reported(write):
     fs = ifccheck.check(write(m))
     occ = [f for f in fs if f.rule == "IFC-OCCUPANCY"]
     assert len(occ) == 1 and occ[0].where == [sp.GlobalId] and "ballroom" in occ[0].message
-    f = ifccheck.Facts(m)
+    f = model.Facts(m)
     assert f.persons(sp) is None and f.persons(m.by_type("IfcSpace")[1]) == 40   # 400 m2 at 10 m2 a person
 
 
@@ -403,21 +411,10 @@ def test_tall_building_rooms(write):
 ])
 def test_room_names(name, centre, lobby):
     import ifcopenshell
-    sp = ifcopenshell.file(schema="IFC4").createIfcSpace(Name="01", ObjectType=name)   # a Revit room type
-    assert ifccheck.named(sp, ifccheck._COMMAND_CENTRE) is centre
-    assert ifccheck._fire_lobby(sp) is lobby
-
-
-@pytest.mark.parametrize("label", ["60", "FRP 60 min", "REI 120", "FD60", "FD 30", "FRD60", "120 minutes", "1 HR",
-                                   "2 HR FRP", "1/2 hour", "1.5 hrs", "FD", "60 FRP", "one hour", "45", ""])
-def test_rating_parser_and_ids_pattern_agree(label):
-    """ids_build.FRP_PATTERN and ifccheck.frp_minutes are two readings of one convention."""
-    import re
-    in_ids = re.fullmatch(ids_build.FRP_PATTERN, label) is not None
-    read = ifccheck.frp_minutes(label)
-    assert in_ids <= (read is not None), label            # whatever the IDS accepts, the checker reads
-    if read is not None and read in (30, 60, 90, 120, 180, 240):
-        assert in_ids, label                              # and the standard periods it reads, the IDS accepts
+    m = ifcopenshell.file(schema="IFC4")       # kept: an entity dies with its file
+    sp = m.createIfcSpace(Name="01", ObjectType=name)   # a Revit room type
+    assert model.named(sp, rooms.COMMAND_CENTRE) is centre
+    assert model.named(sp, rooms.FIRE_LOBBY) is lobby
 
 
 def _basement_boiler(sprinklered=False, inlet=None, room="Boiler Room", elevation=-4.0):
@@ -468,6 +465,15 @@ def test_foam_inlet_for_basement_boiler(write, sprinklered, inlet, room, elevati
         assert fs[0].where == [sp.GlobalId] and fs[0].clause == "UBBL by-law 233"
 
 
+@pytest.mark.parametrize("name, long_name, shown", [("101", "Office", "101 Office"), ("101", None, "101"),
+                                                    ("Office", "Office", "Office"), (None, None, "GUID")])
+def test_findings_name_rooms_by_number_and_name(name, long_name, shown):
+    import ifcopenshell
+    m = ifcopenshell.file(schema="IFC4")
+    sp = m.createIfcSpace(GlobalId="GUID", Name=name, LongName=long_name)
+    assert model.label(sp) == shown
+
+
 def test_ifc2x3_user_defined_type():
     import ifcopenshell
     import ifcopenshell.guid as guid
@@ -476,4 +482,4 @@ def test_ifc2x3_user_defined_type():
                         PredefinedType="USERDEFINED", ElementType="FOAMINLET")
     fi = m.create_entity("IfcFlowTerminal", GlobalId=guid.new(), Name="FI1")
     m.create_entity("IfcRelDefinesByType", GlobalId=guid.new(), RelatedObjects=[fi], RelatingType=t)
-    assert ifccheck.objects(m, "IfcFireSuppressionTerminal", ("FOAMINLET",)) == [fi]
+    assert model.objects(m, "IfcFireSuppressionTerminal", ("FOAMINLET",)) == [fi]

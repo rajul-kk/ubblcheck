@@ -14,8 +14,7 @@ import ifcopenshell.util.element as uel
 import ifcopenshell.util.placement as uplace
 import ifcopenshell.util.unit as uunit
 import numpy as np
-import shapely
-from shapely.geometry import LineString, MultiPolygon, Point, Polygon
+from shapely.geometry import LineString, MultiPolygon, Polygon
 from shapely.ops import polygonize, unary_union
 
 CUT_HEIGHT = 1.0          # m above storey level: below door heads, above sills
@@ -147,16 +146,6 @@ def door_outline(door):
     return footprint(mesh(door))
 
 
-def clear_width(outline) -> float | None:
-    """Longer side of the minimum rotated rectangle around a door outline."""
-    if outline is None or outline.is_empty:
-        return None
-    r = outline.minimum_rotated_rectangle
-    xs, ys = r.exterior.coords.xy
-    sides = [np.hypot(xs[i + 1] - xs[i], ys[i + 1] - ys[i]) for i in range(4)]
-    return float(max(sides))
-
-
 def polygons(g):
     if g is None or g.is_empty:
         return []
@@ -166,6 +155,3 @@ def polygons(g):
         return list(g.geoms)
     return [p for p in getattr(g, "geoms", []) if isinstance(p, Polygon)]
 
-
-__all__ = ["CUT_HEIGHT", "Mesh", "mesh", "footprint", "section", "volume", "location",
-           "door_outline", "clear_width", "polygons", "Point", "shapely"]

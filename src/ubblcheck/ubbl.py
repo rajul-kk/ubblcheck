@@ -12,8 +12,6 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-SOURCE = "Uniform Building By-Laws 1984 (JKR consolidated text)"
-
 PURPOSE_GROUPS = {
     "I": "Small residential",
     "II": "Institutional",
@@ -231,8 +229,13 @@ def access_perimeter_share(volume_m3: float) -> float:
 # Other numeric thresholds used by checks.
 COMPARTMENT_FLOOR_HEIGHT_M = 30     # by-law 137
 COMPARTMENT_FLOOR_ABOVE_M = 9       # by-law 137
+BASEMENT_FLOOR_M2 = 100             # by-law 138(d): a basement larger than this has a compartment floor over it
 DIRECT_DISTANCE_FRACTION = 2 / 3    # by-law 165(1)
 ROOM_TRAVEL_M = 15                  # by-law 165(3)
+ROOM_PERSONS = 6                    # by-law 165(3): rooms for this many or fewer are measured from the door
+HYDRANT_DISTANCE_M = 91.5           # by-law 225(2): a hydrant this close to fire brigade access
+RISER_HEIGHT_M = 18.3               # by-law 229(1): above this topmost floor, a rising system and a fire lift
+WET_RISER_HEIGHT_M = 30.5           # by-law 231: above this, the rising system is wet
 FIRE_DOOR_FRP_MIN = (30, 60, 120, 240)  # minutes, by-law 162-163 and Ninth Schedule
 MIN_EXITS = 2                        # by-law 177(d)
 COMMAND_CENTRE_HEIGHT_M = 30.5      # by-law 238: buildings over this height have a command and control centre
@@ -424,6 +427,7 @@ class TenthRow:
     light: frozenset      # any one of these
     refer: str | None = None
     errata: str | None = None
+    case_by_case: bool = False   # the Fire Department sets the systems; no line applies in general
 
     @property
     def clause(self) -> str:
@@ -482,7 +486,8 @@ def _row(use, title, r) -> TenthRow:
     ext = tuple(frozenset(alt) for alt in str(r.get("ext") or "").split("|") if alt)
     alarm = frozenset(c for c in str(r.get("alarm") or "").split("&") if c)
     light = frozenset(c for c in str(r.get("light") or "").split("|") if c)
-    return TenthRow(use, title, r["ref"], ext, alarm, light, r.get("refer"), r.get("errata"))
+    return TenthRow(use, title, r["ref"], ext, alarm, light, r.get("refer"), r.get("errata"),
+                    bool(r.get("case_by_case")))
 
 
 def tenth(use: str, **inputs) -> TenthLookup:

@@ -6,7 +6,7 @@ import datetime
 
 from fpdf import FPDF
 
-from .findings import SEVERITIES, Finding, summary
+from .findings import SEVERITIES, Finding, order, summary
 
 SEV_COL = {"error": (190, 30, 30), "warning": (200, 120, 0), "info": (90, 90, 90)}
 _SUBST = {"–": "-", "—": "-", "‘": "'", "’": "'", "“": '"', "”": '"',
@@ -71,8 +71,7 @@ def write(findings: list[Finding], path: str, meta: dict) -> str:
         doc.multi_cell(0, 6, "No findings. The checks that ran found nothing to fix; items the tool "
                              "cannot read (scanned pages, geometry) still need a human check.",
                        new_x="LMARGIN", new_y="NEXT")
-    order = {s: i for i, s in enumerate(SEVERITIES)}
-    for n, f in enumerate(sorted(findings, key=lambda f: (order[f.severity], f.rule)), 1):
+    for n, f in enumerate(sorted(findings, key=lambda f: order(f.severity, f.rule)), 1):
         if doc.get_y() > 260:
             doc.add_page()
         doc.set_font("Helvetica", "B", 9)

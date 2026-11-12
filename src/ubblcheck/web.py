@@ -25,7 +25,7 @@ from flask import Flask, abort, redirect, render_template, request, send_from_di
 from werkzeug.utils import secure_filename
 
 from . import pdfcheck, run, ubbl
-from .findings import SEVERITIES
+from . import findings as fnd
 
 RUN_ID = re.compile(r"^[0-9a-f]{32}$")
 MAX_UPLOAD_MB = 512
@@ -35,7 +35,7 @@ class InputError(ValueError):
     """Something wrong with what was uploaded or typed; shown on the form page, not as a crash."""
 
 
-LOCAL_HOSTS = ["127.0.0.1", "localhost", "[::1]"]
+LOCAL_HOSTS = ["127.0.0.1", "localhost", "[::1]"]     # as Host headers write them
 
 
 def create_app(work_dir: str | None = None, trusted_hosts: list[str] | None = LOCAL_HOSTS) -> Flask:
@@ -96,12 +96,8 @@ def create_app(work_dir: str | None = None, trusted_hosts: list[str] | None = LO
                 raise InputError("Choose an IFC model to check.")
             if not up.filename.lower().endswith(".ifc"):
                 raise InputError(f"{up.filename} is not an .ifc file.")
-            try:
-                cell = float(request.form.get("cell") or 0.2)
-            except ValueError:
-                cell = -1.0
-            if not 0.05 <= cell <= 1.0:
-                raise InputError("Grid cell must be a number of metres between 0.05 and 1.")
+            cell = _number(request.form.get("cell"), 0.2, 0.05, 1.0,
+                           "Grid cell must be a number of metres between 0.05 and 1.")
             path = _save(up, os.path.join(d, "in"))
             try:
                 r = run.ifc(path, os.path.join(d, "out"), geometry=geometry, heatmaps=heatmaps, cell=cell)
@@ -146,10 +142,9 @@ def create_app(work_dir: str | None = None, trusted_hosts: list[str] | None = LO
         d = run_dir(rid)
         info = _load(os.path.join(d, "run.json"))
         doc = _load(os.path.join(d, "out", info["files"]["json"]))
-        order = {s: i for i, s in enumerate(SEVERITIES)}
-        fs = sorted(doc["findings"], key=lambda f: (order[f["severity"]], f["rule"]))
+        fs = sorted(doc["findings"], key=lambda f: fnd.order(f["severity"], f["rule"]))
         return render_template("result.html", rid=rid, info=info, meta=doc["meta"], summary=doc["summary"],
-                               findings=fs, severities=SEVERITIES)
+                               findings=fs, severities=fnd.SEVERITIES)
 
     @app.get("/runs/<rid>/files/<path:name>")
     def output(rid, name):
@@ -161,6 +156,17 @@ def create_app(work_dir: str | None = None, trusted_hosts: list[str] | None = LO
         return page(f"Upload is larger than {MAX_UPLOAD_MB} MB.", status=413)
 
     return app
+
+
+def _number(raw, default: float, lo: float, hi: float, message: str) -> float:
+    """A number typed into the form, `default` when blank; InputError unless lo <= it <= hi."""
+    try:
+        v = float(raw) if raw not in (None, "") else default
+    except ValueError:
+        raise InputError(message) from None
+    if not lo <= v <= hi:
+        raise InputError(message)
+    return v
 
 
 def _save(up, folder: str) -> str:
@@ -181,9 +187,8 @@ def _record(d: str, r: run.Run, uploads: list[str]) -> None:
     info = {"kind": r.kind, "stem": r.stem, "uploads": uploads, "summary": r.summary,
             "created": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
             "files": {role: os.path.relpath(p, out).replace(os.sep, "/") for role, p in r.files.items()},
-            "heatmaps": [{"path": os.path.relpath(p, out).replace(os.sep, "/"),
-                          "storey": os.path.splitext(os.path.basename(p))[0].removeprefix("travel-").replace("_", " ")}
-                         for p in r.heatmaps]}
+            "heatmaps": [{"path": os.path.relpath(p, out).replace(os.sep, "/"), "storey": storey}
+                         for storey, p in r.heatmaps.items()]}
     with open(os.path.join(d, "run.json"), "w", encoding="utf-8") as fh:
         json.dump(info, fh, indent=1)
 
@@ -213,7 +218,7 @@ def _sub_uses() -> dict[str, list[str]]:
 
 
 def serve(host: str = "127.0.0.1", port: int = 8765, work_dir: str | None = None) -> None:
-    local = host in ("127.0.0.1", "localhost", "::1")
+    local = host in ("::1", *LOCAL_HOSTS)
     if not local:
         print(f"ubblcheck: listening on {host}: anyone who can reach it can upload and read results", file=sys.stderr)
     app = create_app(work_dir, LOCAL_HOSTS if local else None)

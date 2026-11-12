@@ -17,6 +17,7 @@
 #   height (m), floor_area (largest storey, m2), total_area (all storeys, m2),
 #   volume (largest compartment, or the building, m3): [min, max): min included, max not
 #   refer: the Schedule gives words, not codes, for this row; reported for a person to check
+#   case_by_case: true when the Fire Department sets the systems, so no line applies in general
 #   errata: key in ubbl.ERRATA where the printed row needed a reading
 #
 # Rows are ordered so a stricter line is tried first where the printed ranges overlap.
@@ -168,7 +169,7 @@ uses:
   VII:
     title: Places of assembly
     rows:
-      - {ref: VII, ext: "", alarm: "", light: "",
+      - {ref: VII, ext: "", alarm: "", light: "", case_by_case: true,
          refer: "The Schedule lists only special assembly risks: class A and B below exit discharge and stages with fly galleries (A & G, 2, b), and hazardous areas (A-F, a)"}
 
   VIII.parking:

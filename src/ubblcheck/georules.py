@@ -24,41 +24,11 @@ import ifcopenshell.util.placement as uplace
 from shapely.geometry import Point, Polygon
 from shapely.ops import unary_union
 
-from . import geom, travel, ubbl
+from . import geom, rooms, travel, ubbl
 from .findings import Finding
-from .ifccheck import (_FLOOR_SLABS, PSET, Facts, _prop, exits_declared, frp_minutes, host_wall, named, not_floor,
-                       objects, space_labels, storey_exits)
+from .model import PSET, Facts, common, host_wall, is_floor_slab, label, labels, named, not_floor, objects, prop, rating
 
 ABUT_M = 10.0          # assumption: a face "abuts" access within this distance (not in UBBL)
-ACCESS_WIDTH_M = ubbl.ACCESS_ROAD_MIN_M
-HYDRANT_M = 91.5
-ROOM_PERSONS = 6       # by-law 165(3)
-
-# Room-use words -> purpose group.  Ancillary rooms carry no group.
-USE_WORDS = [
-    ("II", r"ward|wad|patient|pesakit|nursing|hospital|nursery|taska|creche|old folk"),
-    ("III", r"bed ?room|bilik tidur|hotel|guest ?room|apartment|flat|dormitor|asrama|hostel|suite|living|dining"),
-    ("IV", r"office|pejabat|admin|meeting|mesyuarat|conference|work ?station|clerk"),
-    ("V", r"shop|kedai|retail|restaurant|restoran|cafe|kafe|food court|salon|barber|showroom|mart"),
-    ("VI", r"factory|kilang|production|pengeluaran|workshop|bengkel|assembly line|process"),
-    ("VII", r"\bhall\b|dewan|auditorium|cinema|panggung|theatre|surau|mosque|masjid|church|gereja|temple|"
-            r"classroom|bilik darjah|lecture|gym|function room|banquet|lounge"),
-    ("VIII", r"store|stor|storage|warehouse|gudang|car ?park|parking|letak kereta|garage|archive|loading"),
-]
-ANCILLARY = re.compile(r"toilet|tandas|wc|lobby|lobi|corridor|koridor|hallway|(entry|entrance) hall|foyer|"
-                       r"passage|laluan|stair|tangga|lift|riser|shaft|"
-                       r"plant|m&e|electrical|genset|pump|pam|janitor|pantry|ahu|duct|void", re.I)
-
-
-def use_group(space) -> str | None:
-    label = " ".join(space_labels(space))
-    if not label or ANCILLARY.search(label):
-        return None
-    for g, pat in USE_WORDS:
-        if re.search(pat, label, re.I):
-            return g
-    return None
-
 
 def _z(product, scale) -> float:
     if getattr(product, "ObjectPlacement", None) is not None:
@@ -68,11 +38,11 @@ def _z(product, scale) -> float:
 
 class Plan:
     """One storey in plan: floor spaces, cut walls, doors, and its exits.  The exits are the ones
-    ifccheck counts (storey_exits): exit doors, or on a storey with none, the escape stairs coming
+    the exit count uses (Facts.exits): exit doors, or on a storey with none, the escape stairs coming
     up to it, reached at their plan outline."""
 
-    def __init__(self, f: Facts, storey, by_storey, exits):
-        """exits: (elements, by stair), this storey's entry of storey_exits(f)."""
+    def __init__(self, f: Facts, storey, by_storey):
+        """by_storey: the storey's elements by class (_by_storey)."""
         self.storey = storey
         self.z = _z(storey, f.scale)
         cut = self.z + geom.CUT_HEIGHT
@@ -80,20 +50,20 @@ class Plan:
         for sp in by_storey["IfcSpace"]:
             if not_floor(sp):
                 continue
-            fp = geom.footprint(geom.mesh(sp))
+            fp = f.footprint(sp)
             if fp is not None and fp.area > 0.05:
                 self.spaces.append((sp, fp))
-        cuts = [(e, geom.section(geom.mesh(e), cut)) for t in ("IfcWall", "IfcColumn", "IfcCurtainWall")
+        cuts = [(e, geom.section(f.mesh(e), cut)) for t in ("IfcWall", "IfcColumn", "IfcCurtainWall")
                 for e in by_storey[t]]
         self.walls = [(e, c) for e, c in cuts if c is not None and not e.is_a("IfcColumn")]   # walls, curtain walls
-        self.windows = list(by_storey["IfcWindow"])
+        self.openings = list(by_storey["IfcDoor"]) + list(by_storey["IfcWindow"])   # with or without geometry
         self.obstacles = [c for _, c in cuts]
         self.doors = []
         for d in by_storey["IfcDoor"]:
             o = geom.door_outline(d)
             if o is not None and not o.is_empty:
                 self.doors.append((d, o))
-        elements, self.via_stairs = exits
+        elements, self.via_stairs = f.exits.get(storey, ([], False))
         outline = dict((d.id(), o) for d, o in self.doors)
         self.exit_elements, self.exits_without_plan = [], []
         for e in elements:
@@ -110,7 +80,7 @@ class Plan:
 
     @property
     def name(self):
-        return self.storey.Name or self.storey.GlobalId
+        return label(self.storey)
 
     def solve(self, cell):
         if not self.spaces or not self.exits:
@@ -132,16 +102,33 @@ def _by_storey(f: Facts):
     return out
 
 
-def _travel(f: Facts, plans, heat_dir, cell):
+def plans(f: Facts) -> list[Plan]:
+    """Every storey in plan, lowest first."""
+    bys = _by_storey(f)
+    return [Plan(f, s, bys[s.id()]) for s in f.storeys]
+
+
+def _heatmap_key(pl: Plan, taken: dict) -> str:
+    """The storey's name, with its GlobalId when another storey has the same name."""
+    return pl.name if pl.name not in taken else f"{pl.name} ({pl.storey.GlobalId})"
+
+
+def _heatmap_path(heat_dir: str, pl: Plan, taken: dict) -> str:
+    """travel-<storey>.png, with the GlobalId added when that file is already another storey's."""
+    stem = os.path.join(heat_dir, "travel-" + re.sub(r"[^A-Za-z0-9_-]", "_", pl.name))
+    path = stem + ".png"
+    if path in taken.values():
+        path = f"{stem}-{re.sub(r'[^A-Za-z0-9_-]', '_', pl.storey.GlobalId)}.png"
+    return path
+
+
+def _travel(f: Facts, plans, heat_dir, cell, heatmaps):
     out = []
-    try:
-        lim = ubbl.travel_limit(f.group, f.sprinklered, f.use)
-    except KeyError:
-        return out
-    if lim.travel_m is None:
+    lim = f.travel           # None: IFC-TRAVEL-USE reports why
+    if lim is None or lim.travel_m is None:
         return out
     open_plan = (f.use or "").endswith("open_plan")
-    if not exits_declared(f):
+    if not f.exits_declared:
         if any(pl.spaces for pl in plans):
             out.append(Finding("GEO-NOEXIT", "warning", "No door states whether it is a fire exit "
                                "(Pset_DoorCommon.FireExit), so no travel distance can be measured",
@@ -152,7 +139,7 @@ def _travel(f: Facts, plans, heat_dir, cell):
             continue
         if not pl.exits and pl.exits_without_plan:
             out.append(Finding("GEO-EXIT-GEOM", "warning",
-                               f"{pl.name}: its exits ({', '.join(e.Name or e.GlobalId for e in pl.exits_without_plan)}) "
+                               f"{pl.name}: its exits ({', '.join(label(e) for e in pl.exits_without_plan)}) "
                                "have no plan geometry the checker can read, so no travel distance can be measured",
                                "UBBL by-law 165", [e.GlobalId for e in pl.exits_without_plan]))
             continue
@@ -165,20 +152,20 @@ def _travel(f: Facts, plans, heat_dir, cell):
         fld = pl.solve(cell)
         if heat_dir:
             os.makedirs(heat_dir, exist_ok=True)
-            travel.heatmap(fld, lim.travel_m, os.path.join(heat_dir, f"travel-{re.sub(r'[^A-Za-z0-9_-]', '_', pl.name)}.png"))
+            heatmaps[_heatmap_key(pl, heatmaps)] = travel.heatmap(fld, lim.travel_m, _heatmap_path(heat_dir, pl, heatmaps))
         for sp, poly in pl.spaces:
             rd = [o for d, o in pl.doors if o.buffer(travel.CLEARANCE).intersects(poly)]
             r = travel.space_travel(fld, poly, rd)
             if r is not None:
-                out += _space_travel_findings(f, f"{pl.name} {sp.Name or sp.GlobalId}", sp, poly, r, fld, lim,
-                                              open_plan or _prop(sp, PSET, "OpenPlan") is True)
+                out += _space_travel_findings(f, f"{pl.name} {label(sp)}", sp, poly, r, fld, lim,
+                                              open_plan or prop(sp, PSET, "OpenPlan") is True)
     return out
 
 
 def _exit_spacing(f: Facts, plans) -> list[Finding]:
     """By-law 174(1): where a storey needs two exits, two of them are at least 5 m apart, measured
     between the nearest edges of the openings.  Not where by-law 194 allows a single staircase."""
-    if ubbl.single_stair_allowed(f.group, f.use, f.top_floor_m):
+    if f.single_stair_allowed:
         return []
     out = []
     for pl in plans:
@@ -194,14 +181,21 @@ def _exit_spacing(f: Facts, plans) -> list[Finding]:
     return out
 
 
-# by-law 139(a)-(f), and the plant rooms Bomba treats the same way, in English and Malay
-_RISK_ROOM = re.compile(r"boiler|laundr|linen|\bLPG\b|gas (store|storage|room)|gen-?set|generator room|transformer"
-                        r"|substation|hazardous|\bdobi\b|dandang|janakuasa|pengubah|pencawang|bilik (linen|gas|genset)",
-                        re.I)
 TOUCH_M = 0.3           # a wall this close to a room's outline may enclose it ...
-ENCLOSES_M = 1.0        # ... if it runs at least this far along the outline (a partition butting on is shorter)
-_PSET = {"IfcWall": "Pset_WallCommon", "IfcCurtainWall": "Pset_CurtainWallCommon", "IfcDoor": "Pset_DoorCommon",
-         "IfcWindow": "Pset_WindowCommon"}
+ENCLOSES_M = 1.0        # ... if it runs at least this far along the outline, and further than a wall
+                        # butting on end-first would (its thickness plus TOUCH_M each side)
+
+
+def _encloses(outline, cut) -> bool:
+    """Does a wall's cut run along a room's outline, rather than butt onto it?"""
+    rect = cut.minimum_rotated_rectangle
+    if isinstance(rect, Polygon) and not rect.is_empty:
+        r = rect.exterior.coords
+        thick = min(Point(r[0]).distance(Point(r[1])), Point(r[1]).distance(Point(r[2])))
+    else:                   # a cut with no area (a line or a point) has no thickness
+        thick = 0.0
+    along = outline.intersection(cut.buffer(TOUCH_M)).length
+    return along >= max(ENCLOSES_M, thick + 2 * TOUCH_M + 0.1)
 
 
 def _risk_rooms(f: Facts, plans) -> list[Finding]:
@@ -211,43 +205,34 @@ def _risk_rooms(f: Facts, plans) -> list[Finding]:
     local authority sets the period and the rooms are found by name."""
     out = []
     for pl in plans:
-        rating = {}
-
-        def minutes(e):
-            if e.id() not in rating:
-                rating[e.id()] = frp_minutes(_prop(e, _PSET.get(e.is_a(), ""), "FireRating"))
-            return rating[e.id()]
-
         for sp, poly in pl.spaces:
-            if not named(sp, _RISK_ROOM):
+            if not named(sp, rooms.RISK_ROOM):
                 continue
-            label = f"{pl.name} {sp.LongName or sp.Name or sp.GlobalId}"
-            walls = [w for w, c in pl.walls if poly.boundary.intersection(c.buffer(TOUCH_M)).length >= ENCLOSES_M]
+            where = f"{pl.name} {label(sp)}"
+            walls = [w for w, c in pl.walls if _encloses(poly.boundary, c)]
             if not walls:
                 out.append(Finding("GEO-RISK-ROOM", "warning",
-                                   f"{label}: fire risk room, but no wall was found along its outline, so its "
+                                   f"{where}: fire risk room, but no wall was found along its outline, so its "
                                    "separation was not checked", "UBBL by-law 139", [sp.GlobalId]))
                 continue
             ids = {w.id() for w in walls}
-            openings = [o for o in [d for d, _ in pl.doors] + pl.windows
-                        if (h := host_wall(o)) is not None and h.id() in ids]
-            weak = [(e, minutes(e), need) for e, need in [(w, ubbl.RISK_AREA_FRP_MIN) for w in walls]
-                    + [(o, ubbl.FIRE_DOOR_FRP_MIN[0]) for o in openings]
-                    if minutes(e) is None or minutes(e) < need]
+            openings = [o for o in pl.openings if (h := host_wall(o)) is not None and h.id() in ids]
+            need = [(w, ubbl.RISK_AREA_FRP_MIN) for w in walls] + [(o, ubbl.FIRE_DOOR_FRP_MIN[0]) for o in openings]
+            weak = [(e, m, n) for e, n in need if (m := rating(e)) is None or m < n]
             if weak:
-                what = "; ".join(f"{e.Name or e.GlobalId} {'unrated or unreadable' if m is None else f'{m} min'}"
+                what = "; ".join(f"{label(e)} {'unrated or unreadable' if m is None else f'{m} min'}"
                                  f" (needs {need})" for e, m, need in weak[:6]) + (" ..." if len(weak) > 6 else "")
                 out.append(Finding("GEO-RISK-ROOM", "warning",
-                                   f"{label}: fire risk room not separated by fire-resisting construction: {what}. "
+                                   f"{where}: fire risk room not separated by fire-resisting construction: {what}. "
                                    "The local authority sets the period", "UBBL by-law 139",
                                    [sp.GlobalId] + [e.GlobalId for e, _, _ in weak]))
     return out
 
 
 def _small_room(f: Facts, sp, area) -> bool:
-    """A room for ROOM_PERSONS or fewer, which by-law 165(3) measures from its door."""
+    """A room for ubbl.ROOM_PERSONS or fewer, which by-law 165(3) measures from its door."""
     persons = f.persons(sp, area)
-    return persons is not None and persons <= ROOM_PERSONS
+    return persons is not None and persons <= ubbl.ROOM_PERSONS
 
 
 def _space_travel_findings(f: Facts, nm, sp, poly, r, fld, lim, open_plan) -> list[Finding]:
@@ -279,7 +264,7 @@ def _space_travel_findings(f: Facts, nm, sp, poly, r, fld, lim, open_plan) -> li
                            f"{nm}: walking distance {measured:.1f} m is over the {lim.travel_m:g} m "
                            f"limit by less than the method tolerance ({tol:.1f} m); measure by hand",
                            lim.clause, gid, detail))
-    declared = _prop(sp, PSET, "MaxTravelDistance")
+    declared = prop(sp, PSET, "MaxTravelDistance")
     if declared is not None and measured > float(declared) * f.scale + tol:
         out.append(Finding("GEO-DECLARED", "warning",
                            f"{nm}: declared travel distance {float(declared) * f.scale:.1f} m, "
@@ -300,7 +285,7 @@ def _building_outline(f: Facts):
     parts = []
     for t in ("IfcSlab", "IfcWall"):
         for e in f.model.by_type(t):
-            fp = geom.footprint(geom.mesh(e))
+            fp = f.footprint(e)
             if fp is not None:
                 parts.append(fp)
     if not parts:
@@ -329,8 +314,8 @@ def _access(f: Facts):
     vol, how = _building_volume(f, outline)
     access = []
     for e in f.model.by_type("IfcProduct"):
-        if _prop(e, PSET, "FireApplianceAccess") is True:
-            fp = geom.footprint(geom.mesh(e))
+        if prop(e, PSET, "FireApplianceAccess") is True:
+            fp = f.footprint(e)
             if fp is not None:
                 access.append((e, fp))
     need = ubbl.access_perimeter_share(vol or 0)
@@ -341,7 +326,7 @@ def _access(f: Facts):
                            "access, but no element is flagged MY_FireSafety.FireApplianceAccess", clause, []))
     if access and outline is not None:
         acc = unary_union([p for _, p in access])
-        r = ACCESS_WIDTH_M / 2
+        r = ubbl.ACCESS_ROAD_MIN_M / 2
         wide = acc.buffer(-r + 1e-6).buffer(r)      # parts at least 12 m wide
         ring = outline.exterior
         near = ring.intersection(wide.buffer(ABUT_M)) if not wide.is_empty else None
@@ -350,12 +335,12 @@ def _access(f: Facts):
                   "share": round(share, 3), "required": need, "abut_m": ABUT_M}
         if wide.is_empty:
             out.append(Finding("GEO-ACCESS-WIDTH", "error" if need else "warning",
-                               f"Fire appliance access is nowhere {ACCESS_WIDTH_M:g} m wide", clause,
+                               f"Fire appliance access is nowhere {ubbl.ACCESS_ROAD_MIN_M:g} m wide", clause,
                                [e.GlobalId for e, _ in access]))
         elif share + 1e-9 < need:
             out.append(Finding("GEO-ACCESS", "error",
                                f"{share:.0%} of the building perimeter ({ring.length:.0f} m) is within {ABUT_M:g} m of "
-                               f"a >= {ACCESS_WIDTH_M:g} m access; volume {vol:,.0f} m3 needs {need:.0%}",
+                               f"a >= {ubbl.ACCESS_ROAD_MIN_M:g} m access; volume {vol:,.0f} m3 needs {need:.0%}",
                                clause, [e.GlobalId for e, _ in access], detail))
         hyd = objects(f.model, "IfcFireSuppressionTerminal", ("FIREHYDRANT",))
         if not hyd:
@@ -367,10 +352,10 @@ def _access(f: Facts):
                 p = geom.location(h)
                 if p is not None:
                     ds.append((acc.distance(Point(p)), h))
-            if ds and min(d for d, _ in ds) > HYDRANT_M:
+            if ds and min(d for d, _ in ds) > ubbl.HYDRANT_DISTANCE_M:
                 d, h = min(ds, key=lambda x: x[0])
                 out.append(Finding("GEO-HYDRANT", "error",
-                                   f"Nearest hydrant is {d:.0f} m from fire brigade access; limit {HYDRANT_M} m",
+                                   f"Nearest hydrant is {d:.0f} m from fire brigade access; limit {ubbl.HYDRANT_DISTANCE_M} m",
                                    "UBBL by-law 225(2)", [h.GlobalId]))
     return out
 
@@ -381,12 +366,12 @@ def _groups(f: Facts):
     by_comp = defaultdict(lambda: defaultdict(float))
     comp_members = defaultdict(list)
     for sp in f.model.by_type("IfcSpace"):
-        g = use_group(sp)
+        g = rooms.use_group(" ".join(labels(sp)))
         if g is None:
             continue
         a = f.floor_area(sp)
         by_group[g] += a
-        cid = _prop(sp, PSET, "CompartmentId")
+        cid = prop(sp, PSET, "CompartmentId")
         if cid is not None:
             by_comp[cid][g] += a
             comp_members[cid].append(sp.GlobalId)
@@ -421,14 +406,15 @@ def _basement(f: Facts):
         return out
     ground = min(f.above_ground, key=f.elev, default=None)
     for b in f.basements:
-        area = sum(f.floor_area(sp) for sp in f.model.by_type("IfcSpace") if f.storey_of(sp) == b)
-        if area <= 100:
+        area = f.sizes.storey_area.get(b.id(), 0.0)
+        if area <= ubbl.BASEMENT_FLOOR_M2:
             continue
         above = min((s for s in f.storeys if f.elev(s) > f.elev(b)), key=f.elev, default=ground)
-        where = f"Basement {b.Name} is {area:.0f} m2 (> 100 m2); the floor over it ({above.Name if above else '?'})"
+        where = (f"Basement {label(b)} is {area:.0f} m2 (> {ubbl.BASEMENT_FLOOR_M2} m2); the floor over it "
+                 f"({label(above) if above else '?'})")
         slabs = [s for s in f.model.by_type("IfcSlab")
-                 if f.storey_of(s) == above and (s.PredefinedType or "") in _FLOOR_SLABS]
-        declared = {s: _prop(s, "Pset_SlabCommon", "Compartmentation") for s in slabs}
+                 if f.storey_of(s) == above and is_floor_slab(s)]
+        declared = {s: common(s, "Compartmentation") for s in slabs}
         no = [s.GlobalId for s, v in declared.items() if v is False]
         unknown = [s.GlobalId for s, v in declared.items() if v is None]
         if no:
@@ -443,16 +429,17 @@ def _basement(f: Facts):
     return out
 
 
-def check(model: ifcopenshell.file, heat_dir: str | None = None, cell: float = 0.2) -> list[Finding]:
+def check(model: ifcopenshell.file, heat_dir: str | None = None, cell: float = 0.2,
+          heatmaps: dict | None = None) -> list[Finding]:
+    """heat_dir: write a travel-distance PNG per storey there, and record each in `heatmaps`
+    (storey name -> path) when given."""
     f = Facts(model)
     out = []
     if f.group in ubbl.PURPOSE_GROUPS:
-        bys = _by_storey(f)
-        exits = storey_exits(f)
-        plans = [Plan(f, s, bys[s.id()], exits.get(s, ([], False))) for s in f.storeys]
-        out += _travel(f, plans, heat_dir, cell)
-        out += _exit_spacing(f, plans)
-        out += _risk_rooms(f, plans)
+        pls = plans(f)
+        out += _travel(f, pls, heat_dir, cell, {} if heatmaps is None else heatmaps)
+        out += _exit_spacing(f, pls)
+        out += _risk_rooms(f, pls)
     out += _access(f)
     out += _groups(f)
     out += _basement(f)

@@ -11,6 +11,11 @@ from xml.sax.saxutils import escape
 SEVERITIES = ("error", "warning", "info")
 
 
+def order(severity: str, rule: str) -> tuple:
+    """Sort key for findings: errors first, then by rule."""
+    return SEVERITIES.index(severity), rule
+
+
 @dataclass
 class Finding:
     rule: str            # stable rule id, e.g. "IFC-COMP-AREA" or "PDF-P07"
