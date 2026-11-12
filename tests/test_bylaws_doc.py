@@ -15,10 +15,12 @@ import re
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SRC = ROOT / "src" / "ubblcheck"
 PART_VII_VIII = set(range(133, 254))
-# 'by-law 165(4)', 'by-laws 175-177', 'by-law 213, 216', 'by-law 162 and 163'; a number followed
-# by a unit ('by-law 136, 150 m2') is not a by-law
-_ITEM = r"\d+(?:\(\w+\))*(?!\d|\s*(?:m\b|mm\b|m2|m3|%|min\b))"
-CITE = re.compile(rf"by-laws? ({_ITEM}(?:\s*(?:-|–|,|and)\s*{_ITEM})*)", re.I)
+# 'by-law 165(4)', 'by-laws 175-177', 'by-law 213, 216', 'by-law 162 and 163'.  A later number in
+# the list counts only when punctuation, 'and' or the end follows it: in 'by-law 175, 200 persons'
+# or 'by-law 136, 150 m2', 200 and 150 are not by-laws.
+_FIRST = r"\d+(?:\(\w+\))*"
+_MORE = r"\d+(?:\(\w+\))*(?=\s*(?:[-–,;:.)\]'\"]|and\b|$))"
+CITE = re.compile(rf"by-laws? ({_FIRST}(?:\s*(?:-|–|,|and)\s*{_MORE})*)", re.I | re.M)
 MARKS = {"checked", "data", "shown", "—"}
 
 
@@ -43,7 +45,8 @@ def source(name: str) -> str:
 
 @functools.cache
 def ubbl_definitions() -> dict[str, str]:
-    """Top-level name in ubbl.py -> its source, with the comment lines just above it."""
+    """Top-level name in ubbl.py -> (its source with the comment lines just above it, the names its
+    code refers to)."""
     text = source("ubbl.py")
     lines = text.splitlines()
     out = {}
@@ -60,21 +63,28 @@ def ubbl_definitions() -> dict[str, str]:
         while start > 0 and lines[start - 1].lstrip().startswith("#"):
             start -= 1
         seg = "\n".join(lines[start:node.end_lineno])
+        refs = {x.id for x in ast.walk(node) if isinstance(x, ast.Name)} - set(names)
         for n in names:
-            out[n] = seg
+            out[n] = (seg, refs)
     return out
+
+
+def ubbl_uses(name: str) -> set[str]:
+    """The ubbl names a module's code uses as `ubbl.NAME` (comments and strings don't count)."""
+    return {x.attr for x in ast.walk(ast.parse(source(name)))
+            if isinstance(x, ast.Attribute) and isinstance(x.value, ast.Name) and x.value.id == "ubbl"}
 
 
 def via_ubbl(files) -> set[int]:
     """By-laws cited by the ubbl definitions these files use, and by the ubbl names those use."""
     defs = ubbl_definitions()
-    todo = {n for f in files for n in re.findall(r"\bubbl\.(\w+)", source(f)) if n in defs}
+    todo = {n for f in files for n in ubbl_uses(f) if n in defs}
     seen = set()
     while todo:
         n = todo.pop()
         seen.add(n)
-        todo |= {m for m in re.findall(r"\b(\w+)\b", defs[n]) if m in defs} - seen
-    return set().union(*(cites(defs[n]) for n in seen))
+        todo |= {m for m in defs[n][1] if m in defs} - seen
+    return set().union(*(cites(defs[n][0]) for n in seen))
 
 
 def evidence() -> dict[tuple[str, str], set[int]]:
@@ -128,3 +138,6 @@ def test_cite_pattern():
     assert cites("By-law 165, 175-177") == {165, 175, 176, 177}
     assert cites("UBBL by-law 225(1), 237(1), Tenth Schedule") == {225, 237}
     assert cites("by-laws 162 and 163") == {162, 163}
+    assert cites("UBBL by-law 175, 200 persons") == {175}
+    assert cites("By-law 194 allows a single staircase") == {194}
+    assert cites("by-law 213, 216, Ninth Schedule") == {213, 216}
