@@ -32,7 +32,7 @@ needs a drawing checklist item to cite it. A by-law the code cites can't be mark
 | 147 | Construction of separating walls | — | shown | Compartment walls marked on plans (P07) |
 | 148 | Special requirements, compartment walls and floors | data | shown | Fire rating asked for on every compartment wall and slab (MY-P08, MY-P09) |
 | 149 | Horizontal and vertical barriers in external walls | — | — | Needs facade geometry (spandrels) |
-| 150 | Protected shafts | — | — | Possible: shaft spaces enclosed by rated walls |
+| 150 | Protected shafts | checked | — | Shafts, risers and ducts found by name: the walls along the outline at least 1 hour, doors in them fire doors (half an hour, lift landing doors included), no windows (GEO-SHAFT, warning). One hour is the least period checked; the non-combustible materials of (3) and fire-stopping (6) are not judged |
 | 151–152 | Lift shaft ventilation and openings | — | — | Construction detail |
 | 153 | Smoke detectors in lift lobbies | data | — | Detector objects asked for (active IDS); placement not judged |
 | 154–155 | Lift emergency and fire modes | — | — | Operation, not drawn |
@@ -54,7 +54,10 @@ needs a drawing checklist item to cite it. A by-law the code cites can't be mark
 | 175 | Occupant load | checked | shown | Seventh Schedule loads; drawings: calculation table (PG2) |
 | 176 | Storey exit width | checked | shown | IFC-EXIT-WIDTH |
 | 177 | Number and width of staircases | checked | shown | Two exits per storey (177(d), IFC-EXIT-COUNT); stair widths and (a)-(c), (e)-(f) not judged |
-| 178–188 | Places of assembly: exits, seating, gangways, travel | — | — | Not yet: needs seating layout and the assembly class of by-law 179 |
+| 178 | Exits of assembly separated from other occupancies | — | — | Construction detail |
+| 179–183 | Places of assembly: class, occupancy load, exit units, rate of discharge, exits | checked | — | Rooms used for assembly (by name, or `MY_FireSafety.FixedSeats`): load by 180 (fixed seats, else 0.65, 1.35 or 3 m2 a person), class by 179, exits through the room's doors by 183(d)-(f) (GEO-ASSEMBLY-EXITS), 552 mm units at 100 persons each and no door under 700 mm by 181, 183(a)-(b) (GEO-ASSEMBLY-WIDTH). Every door of the room counts, wherever it leads. Rate of discharge (182), stairs at 75 persons a unit (183(c)) and remoteness are not judged |
+| 184–187 | Seating, gangways, exit doors, notices | — | — | Needs the seating layout; door hardware and notices are not in models |
+| 188 | Travel distance in places of assembly | checked | — | 45 m, 60 m sprinklered, where tighter than the building's limit (GEO-TRAVEL, cited as by-law 188) |
 | 189–191 | Enclosure of escape routes, external stairs, adjacent openings | — | — | Construction detail |
 | 192–193 | Moving walks, power-operated doors | — | — | Rare; not modelled |
 | 194 | Building with single staircase | checked | — | One exit is a warning, not an error, for domestic and office buildings with the topmost floor at most 12 m (IFC-EXIT-SINGLE); the warning lists conditions (a), (b), (i), (iii) and (iv) to confirm |
@@ -86,7 +89,8 @@ needs a drawing checklist item to cite it. A by-law the code cites can't be mark
 | 244–246 | Standards, approval, certification | — | — | Administrative |
 | 247 | Water storage | — | shown | A02, AS2 |
 | 248 | Markings on wet risers | — | shown | A02 |
-| 249–252 | Smoke venting | — | — | Possible: basements and windowless buildings |
+| 249 | Smoke and heat venting | checked | — | A building with an occupied underground storey, or with no windows, and no element named as a smoke vent or extract (IFC-SMOKE-VENT, warning). Large-area factories are left out: the by-law sets no size |
+| 250–252 | Natural vents, adequacy, opening from outside | — | — | Vent position, sizing and operation: design detail |
 | 253 | Emergency power | — | shown | Emergency lights (P12) |
 
 ## What the table shows
