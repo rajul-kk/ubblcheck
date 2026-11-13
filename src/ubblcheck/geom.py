@@ -8,12 +8,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import os
+import threading
+
 import ifcopenshell
 import ifcopenshell.geom
-import ifcopenshell.util.element as uel
 import ifcopenshell.util.placement as uplace
 import ifcopenshell.util.unit as uunit
 import numpy as np
+import shapely
 from shapely.geometry import LineString, MultiPolygon, Polygon
 from shapely.ops import polygonize, unary_union
 
@@ -39,6 +42,12 @@ def settings():
     return _SETTINGS
 
 
+def _to_mesh(g) -> Mesh | None:
+    v = np.asarray(g.verts, dtype=float).reshape(-1, 3)
+    f = np.asarray(g.faces, dtype=int).reshape(-1, 3)
+    return Mesh(v, f) if len(f) else None
+
+
 def mesh(product) -> Mesh | None:
     if not getattr(product, "Representation", None):
         return None
@@ -46,26 +55,45 @@ def mesh(product) -> Mesh | None:
         sh = ifcopenshell.geom.create_shape(settings(), product)
     except Exception:
         return None
-    g = sh.geometry
-    v = np.asarray(g.verts, dtype=float).reshape(-1, 3)
-    f = np.asarray(g.faces, dtype=int).reshape(-1, 3)
-    if not len(f):
-        return None
-    return Mesh(v, f)
+    return _to_mesh(sh.geometry)
+
+
+# one batch at a time, whatever runs at once (two checks from the web page): each uses every core
+_BATCH = threading.Lock()
+
+
+def meshes(model, products) -> dict:
+    """element id -> Mesh or None for those of `products` the kernel tessellates in a batch, on all
+    cores at once.  An element missing from the result (no body, a representation the batch does
+    not read, or the kernel stopped before it) is for mesh() to try on its own."""
+    include = [e for e in products if getattr(e, "Representation", None)]
+    out = {}
+    if not include:
+        return out
+    with _BATCH:
+        try:
+            it = ifcopenshell.geom.iterator(settings(), model, max(1, (os.cpu_count() or 2) - 1), include=include)
+            if it.initialize():
+                while True:
+                    sh = it.get()
+                    out[sh.id] = _to_mesh(sh.geometry)
+                    if not it.next():
+                        break
+        except Exception:       # the kernel's own errors: what is left goes one by one through mesh()
+            pass
+    return out
 
 
 def footprint(m: Mesh | None):
-    """Union of the mesh's triangles projected to plan."""
+    """Union of the mesh's triangles projected to plan (slivers under 1e-8 m2 left out)."""
     if m is None:
         return None
-    tris = []
-    for a, b, c in m.faces:
-        p = Polygon([m.verts[a, :2], m.verts[b, :2], m.verts[c, :2]])
-        if p.area > 1e-8:
-            tris.append(p)
-    if not tris:
+    t = m.verts[m.faces][:, :, :2]                      # (triangles, 3 corners, xy)
+    e1, e2 = t[:, 1] - t[:, 0], t[:, 2] - t[:, 0]
+    t = t[np.abs(e1[:, 0] * e2[:, 1] - e1[:, 1] * e2[:, 0]) / 2 > 1e-8]
+    if not len(t):
         return None
-    return unary_union(tris).buffer(0)
+    return shapely.union_all(shapely.polygons(np.concatenate([t, t[:, :1]], axis=1))).buffer(0)
 
 
 def section(m: Mesh | None, z: float):
@@ -75,8 +103,10 @@ def section(m: Mesh | None, z: float):
     zs = m.verts[:, 2]
     if zs.min() > z or zs.max() < z:
         return None
+    d = m.verts[m.faces][:, :, 2] - z
     segs = []
-    for tri in m.faces:
+    # only a triangle touching the plane can give a segment
+    for tri in m.faces[~((d >= EPS).all(1) | (d <= -EPS).all(1))]:
         p = m.verts[tri]
         d = p[:, 2] - z
         pts = []
@@ -113,37 +143,14 @@ def volume(m: Mesh | None) -> float | None:
     return float(abs(np.einsum("ij,ij->i", v[:, 0], np.cross(v[:, 1], v[:, 2])).sum()) / 6.0)
 
 
-def location(product) -> np.ndarray | None:
-    """Plan position: mesh centroid, else placement origin."""
-    m = mesh(product)
+def location(product, m: Mesh | None) -> np.ndarray | None:
+    """Plan position: the centroid of its mesh `m`, else its placement origin."""
     if m is not None:
         return m.verts[:, :2].mean(axis=0)
     if getattr(product, "ObjectPlacement", None) is None:
         return None
     mat = uplace.get_local_placement(product.ObjectPlacement)
     return mat[:2, 3] * uunit.calculate_unit_scale(product.file)
-
-
-def outline(product):
-    """Plan outline of a product: its own body, else the union of the parts it is made of, railings
-    left out (Revit exports a stair as an empty IfcStair aggregating flights, landings, stringers and
-    railings; other tools use IfcMember or IfcBuildingElementProxy for the flights)."""
-    fp = footprint(mesh(product))
-    if fp is not None and not fp.is_empty:
-        return fp
-    parts = [footprint(mesh(p)) for p in uel.get_decomposition(product)
-             if not p.is_a("IfcRailing")]
-    parts = [p for p in parts if p is not None and not p.is_empty]
-    return unary_union(parts) if parts else None
-
-
-def door_outline(door):
-    """Plan outline of a door: its filled opening if it has one, else its own body."""
-    for rel in getattr(door, "FillsVoids", []) or []:
-        fp = footprint(mesh(rel.RelatingOpeningElement))
-        if fp is not None and not fp.is_empty:
-            return fp
-    return footprint(mesh(door))
 
 
 def polygons(g):

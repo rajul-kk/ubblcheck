@@ -5,7 +5,7 @@ import os
 import pytest
 
 import geomodel as G
-from ubblcheck import geom, georules, rooms, travel, ubbl
+from ubblcheck import georules, rooms, travel, ubbl
 from ubblcheck.model import Facts
 
 
@@ -222,7 +222,7 @@ def test_upper_storey_travels_to_its_stair():
     G.box_floor(md, l0, 20, 10, exits=((0, 2.0), (0, 18.0)))
     G.box_floor(md, l1, 20, 10, z=G.H, exits=())
     stair = _stair(md, l0, G.rect(17, 7, 19, 9.5), 0.0)
-    assert geom.outline(stair).area > 4.5
+    assert Facts(md.m).outline(stair).area > 4.5
     fs = georules.check(md.m)
     assert not [x for x in fs if x.rule in ("GEO-NOEXIT", "GEO-NOROUTE")], [x.message for x in fs]
     pl = plan(md, storey=1)
@@ -395,13 +395,13 @@ def _assembly(md):
 
 def test_assembly_room_capacity_from_area_or_seats():
     md, sp, _ = _hall(long_name="Auditorium")
-    persons, how = georules.assembly_capacity(sp, 195.0)
+    persons, how = georules.assembly_capacity(Facts(md.m), sp, 195.0)
     assert persons == 300 and "0.65" in how                        # 195 / 0.65
     md, sp, _ = _hall(long_name="Conference Room", seats=120)
-    assert georules.assembly_capacity(sp, 195.0)[0] == 120   # fixed seats count, not area
+    assert georules.assembly_capacity(Facts(md.m), sp, 195.0)[0] == 120   # fixed seats count, not area
     for name in ("Office", "Entrance Hall", "Lift Lobby"):
         md, sp, _ = _hall(long_name=name)
-        assert georules.assembly_capacity(sp, 195.0) is None
+        assert georules.assembly_capacity(Facts(md.m), sp, 195.0) is None
 
 
 def test_assembly_room_with_too_few_or_too_narrow_exits():
@@ -441,7 +441,7 @@ def test_assembly_load_from_room_name(name, persons):
     import ifcopenshell
     m = ifcopenshell.file(schema="IFC4")            # kept alive: the space dies with its file
     sp = m.createIfcSpace(GlobalId=ifcopenshell.guid.new(), Name="R1", LongName=name)
-    cap = georules.assembly_capacity(sp, 130.0)
+    cap = georules.assembly_capacity(Facts(m), sp, 130.0)
     assert (cap and cap[0]) == persons
 
 

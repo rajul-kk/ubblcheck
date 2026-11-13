@@ -1,6 +1,6 @@
 """Fire resistance ratings as models write them (an IfcLabel such as 'FRP 60 min' or '1 HR').
 
-The checker (model.rating) and the IDS pack (ids_build) both read the convention from here.
+The checker (model.Facts.rating) and the IDS pack (ids_build) both read the convention from here.
 """
 from __future__ import annotations
 

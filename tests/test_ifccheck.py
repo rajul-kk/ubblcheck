@@ -9,6 +9,19 @@ import ifcmodel
 from ubblcheck import findings, ids_build, ifccheck, model, ratings, rooms
 
 
+def test_property_carriers_include_those_set_through_a_type():
+    import ifcopenshell.api.root as root
+    import ifcopenshell.api.type as itype
+    m = ifcmodel.office(storeys=1)
+    own, typed, plain = (root.create_entity(m, ifc_class="IfcWall", name=n) for n in ("own", "typed", "plain"))
+    wt = root.create_entity(m, ifc_class="IfcWallType", name="WT")
+    itype.assign_type(m, related_objects=[typed], relating_type=wt)
+    ifcmodel._ps(m, own, "Pset_WallCommon", {"SurfaceSpreadOfFlame": "Class 1"})
+    ifcmodel._ps(m, wt, "Pset_WallCommon", {"SurfaceSpreadOfFlame": "Class 2"})
+    names = {e.Name for e in model.Facts(m).carriers("SurfaceSpreadOfFlame")}
+    assert {"own", "typed"} <= names and "plain" not in names
+
+
 @pytest.fixture
 def write(tmp_path):
     def _w(model, name="m.ifc"):

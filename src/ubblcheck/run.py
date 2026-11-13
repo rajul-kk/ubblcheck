@@ -46,13 +46,15 @@ def ifc(path: str, out: str, ids_paths: list[str] | None = None, rules: bool = T
     """IDS pack, schedule rules and (unless geometry=False) geometric rules on an IFC model."""
     import ifcopenshell
     from . import ifccheck
+    from .model import Facts
     model = ifcopenshell.open(path)
-    fs = ifccheck.check_model(model, ids_paths, rules=rules)
+    facts = Facts(model) if rules else None     # read once for both rule passes
+    fs = ifccheck.check_model(model, ids_paths, rules=rules, facts=facts)
     heat_dir = os.path.join(out, "heatmaps") if heatmaps and rules and geometry else None
     maps: dict = {}
     if rules and geometry:
         from . import georules
-        fs += georules.check(model, heat_dir=heat_dir, cell=cell, heatmaps=maps)
+        fs += georules.check(model, heat_dir=heat_dir, cell=cell, heatmaps=maps, facts=facts)
     stem = stem or os.path.splitext(os.path.basename(path))[0]
     r = Run("ifc", stem, fs, {"project": stem, "model": os.path.basename(path)}, heatmaps=maps)
     os.makedirs(out, exist_ok=True)

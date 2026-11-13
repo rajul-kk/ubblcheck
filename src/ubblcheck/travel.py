@@ -97,31 +97,44 @@ def field(walk, obstacles, exits, doors, cell: float = 0.2) -> Field:
     return f
 
 
+def _open_moves(free: np.ndarray, cell: float) -> tuple[list[tuple[int, int, float]], list[int]]:
+    """The moves over the flattened grid, (bit, index offset, length), and per cell a bitmask of
+    the moves from it that stay on the grid and land on, and cross, free cells only."""
+    ny, nx = free.shape
+    moves, bits = [], np.zeros(free.shape, np.int32)
+    for k, (dx, dy, w, via) in enumerate(_MOVES):
+        ys, ye, xs, xe = max(0, -dy), ny - max(0, dy), max(0, -dx), nx - max(0, dx)
+        ok = free[ys:ye, xs:xe] & free[ys + dy:ye + dy, xs + dx:xe + dx]
+        for vx, vy in via:
+            ok = ok & free[ys + vy:ye + vy, xs + vx:xe + vx]
+        bits[ys:ye, xs:xe] |= ok.astype(np.int32) << k
+        moves.append((1 << k, dy * nx + dx, w * cell))
+    return moves, bits.ravel().tolist()
+
+
 def _dijkstra(f: Field) -> None:
-    ny, nx = f.free.shape
-    free = f.free
-    dist = f.dist
-    heap = []
-    for y, x in zip(*np.nonzero(f.exits)):
-        dist[y, x] = 0.0
-        heap.append((0.0, int(y), int(x)))
+    """Multi-source Dijkstra from the exit cells.  The grid is flattened to Python lists: indexing
+    numpy arrays one cell at a time is several times slower."""
+    moves, open_from = _open_moves(f.free, f.cell)
+    dist = [math.inf] * f.free.size
+    heap = [(0.0, i) for i in np.flatnonzero(f.exits).tolist()]
+    for _, i in heap:
+        dist[i] = 0.0
     heapq.heapify(heap)
-    c = f.cell
-    moves = [(dx, dy, w * c, via) for dx, dy, w, via in _MOVES]
+    pop, push = heapq.heappop, heapq.heappush
     while heap:
-        d, y, x = heapq.heappop(heap)
-        if d > dist[y, x]:
+        d, i = pop(heap)
+        if d > dist[i]:
             continue
-        for dx, dy, w, via in moves:
-            xx, yy = x + dx, y + dy
-            if not (0 <= xx < nx and 0 <= yy < ny) or not free[yy, xx]:
-                continue
-            if any(not free[y + vy, x + vx] for vx, vy in via):
-                continue
-            nd = d + w
-            if nd < dist[yy, xx]:
-                dist[yy, xx] = nd
-                heapq.heappush(heap, (nd, yy, xx))
+        can = open_from[i]
+        for bit, off, w in moves:
+            if can & bit:
+                j = i + off
+                nd = d + w
+                if nd < dist[j]:
+                    dist[j] = nd
+                    push(heap, (nd, j))
+    f.dist = np.array(dist).reshape(f.free.shape)
 
 
 @dataclass

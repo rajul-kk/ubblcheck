@@ -2,7 +2,9 @@
 sheet type, floor level and coloured linework."""
 from __future__ import annotations
 
+import os
 import re
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 
 import pdfplumber
@@ -136,19 +138,47 @@ def _title(page, text: str) -> str:
     return s.strip()[:120]
 
 
-def read(path: str, name: str | None = None) -> list[Sheet]:
-    import os
-    name = name or os.path.basename(path)
+# Parsing a page (pdfminer, pure Python) is nearly all of the time, and pages are independent, so a
+# long set is read by several processes, one pool for all its files.  Each holds its own parser,
+# about 100 MB.
+PARALLEL_FROM_PAGES = 8     # below this, starting the processes costs more than it saves
+MAX_WORKERS = 4
+
+
+def read_all(paths: list[str], names: list[str] | None = None) -> list[list[Sheet]]:
+    """The sheets of each PDF, in page order."""
+    names = names or [os.path.basename(p) for p in paths]
+    counts = []
+    for p in paths:
+        with pdfplumber.open(p) as pdf:
+            counts.append(len(pdf.pages))
+    workers = min(MAX_WORKERS, (os.cpu_count() or 1) - 1) if sum(counts) >= PARALLEL_FROM_PAGES else 1
+    if workers <= 1:
+        return [_read_pages(p, nm, range(n)) for p, nm, n in zip(paths, names, counts)]
+    # every k-th page of a file to each worker, so a run of heavy pages is shared out
+    jobs = [(i, k) for i, n in enumerate(counts) for k in range(min(workers, n))]
+    with ProcessPoolExecutor(workers) as pool:
+        parts = pool.map(_read_pages, [paths[i] for i, _ in jobs], [names[i] for i, _ in jobs],
+                         [range(k, counts[i], workers) for i, k in jobs])
+        out = [[] for _ in paths]           # two files may share a name (passive/ and active/)
+        for (i, _), part in zip(jobs, parts):
+            out[i] += part
+    return [sorted(sheets, key=lambda s: s.page) for sheets in out]
+
+
+def _read_pages(path: str, name: str, pages) -> list[Sheet]:
     out = []
     with pdfplumber.open(path) as pdf:
-        for i, page in enumerate(pdf.pages, 1):
+        for i in pages:
+            page = pdf.pages[i]
             text = page.extract_text() or ""
             has_text = len(text.strip()) > 20
             title = _title(page, text) if has_text else "no text layer"
             m = SHEET_NO.search(text)
             kind = kind_of(title, text) if has_text else "general"
-            out.append(Sheet(file=name, page=i, text=text, title=title,
+            out.append(Sheet(file=name, page=i + 1, text=text, title=title,
                              number=m.group(1) if m else None, kind=kind,
                              level=level_of(title) if kind == "floor_plan" else None,
                              colours=_colours(page), has_text=has_text))
+            page.close()                # drop its parsed objects: memory stays flat over a long set
     return out

@@ -30,7 +30,7 @@ from shapely.strtree import STRtree
 
 from . import geom, rooms, travel, ubbl
 from .findings import Finding
-from .model import PSET, Facts, common, host_wall, is_floor_slab, label, labels, named, not_floor, objects, prop, rating
+from .model import PSET, Facts, host_wall, is_floor_slab, label, labels, named, not_floor, objects
 from .ratings import flame_class
 
 ABUT_M = 10.0          # assumption: a face "abuts" access within this distance (not in UBBL)
@@ -44,13 +44,12 @@ def _z(product, scale) -> float:
 class _Wall:
     """A wall (or curtain wall) cut in plan, with what the enclosure checks ask of it, worked out once."""
 
-    def __init__(self, el, cut):
-        self.el, self.cut = el, cut
+    def __init__(self, el, cut, external: bool):
+        self.el, self.cut, self.external = el, cut, external
         self.near = cut.buffer(TOUCH_M)
         # a thin strip's area is about half its perimeter times its thickness, whatever its shape
         # (straight, L-shaped, curved); a cut with no area has none
         self.thick = 2 * cut.area / cut.length if cut.area > 0 else 0.0
-        self.external = common(el, "IsExternal") is True
 
 
 class Plan:
@@ -60,7 +59,7 @@ class Plan:
 
     def __init__(self, f: Facts, storey, by_storey):
         """by_storey: the storey's elements by class (_by_storey)."""
-        self.storey, self._facts = storey, f
+        self.storey, self.facts = storey, f
         self.z = _z(storey, f.scale)
         cut = self.z + geom.CUT_HEIGHT
         self.all_spaces = list(by_storey["IfcSpace"])    # voids and area zones too
@@ -70,9 +69,9 @@ class Plan:
                 self.spaces.append((sp, fp))
         cuts = [(e, geom.section(f.mesh(e), cut)) for t in ("IfcWall", "IfcColumn", "IfcCurtainWall")
                 for e in by_storey[t]]
-        self.walls = [_Wall(e, c) for e, c in cuts if c is not None and not e.is_a("IfcColumn")]
+        self.walls = [_Wall(e, c, f.common(e, "IsExternal") is True) for e, c in cuts if c is not None and not e.is_a("IfcColumn")]
         self._wall_index = STRtree([w.near for w in self.walls]) if self.walls else None
-        self.openings = [(o, geom.door_outline(o)) for t in ("IfcDoor", "IfcWindow")
+        self.openings = [(o, f.door_outline(o)) for t in ("IfcDoor", "IfcWindow")
                          for o in by_storey[t]]      # (door or window, outline or None)
         self._coverings = by_storey["IfcCovering"]
         self.obstacles = [c for _, c in cuts]
@@ -82,7 +81,7 @@ class Plan:
         outline = dict((d.id(), o) for d, o in self.doors)
         self.exit_elements, self.exits_without_plan = [], []
         for e in elements:
-            o = outline.get(e.id()) if e.is_a("IfcDoor") else geom.outline(e)
+            o = outline.get(e.id()) if e.is_a("IfcDoor") else f.outline(e)
             if o is not None and not o.is_empty:
                 self.exit_elements.append((e, o))
             else:
@@ -108,7 +107,7 @@ class Plan:
     def _ceilings(self):
         """(ceiling coverings, their outlines, an index of the outlines), worked out when first asked."""
         cs = [(c, fp) for c in self._coverings if uel.get_predefined_type(c) == "CEILING"
-              and (fp := self._facts.footprint(c)) is not None and not fp.is_empty]
+              and (fp := self.facts.footprint(c)) is not None and not fp.is_empty]
         return cs, (STRtree([fp for _, fp in cs]) if cs else None)
 
     def ceilings_over(self, poly) -> list:
@@ -122,12 +121,12 @@ class Plan:
     @property
     def direct_exit(self) -> bool:
         """Does an exit door on this storey lead straight outside (Pset_DoorCommon.IsExternal)?"""
-        return any(e.is_a("IfcDoor") and common(e, "IsExternal") is True
+        return any(e.is_a("IfcDoor") and self.facts.common(e, "IsExternal") is True
                    for e in [e for e, _ in self.exit_elements] + self.exits_without_plan)
 
     def outline(self, sp):
         """A space's plan outline, or None (Facts caches it, so ask only for the spaces you need)."""
-        fp = self._facts.footprint(sp)
+        fp = self.facts.footprint(sp)
         return None if fp is None or fp.is_empty else fp
 
     def room_doors(self, poly):
@@ -216,7 +215,7 @@ def _travel(f: Facts, plans, heat_dir, cell, heatmaps):
                 out += _space_travel_findings(f, f"{pl.name} {label(sp)}", sp, poly, r, fld,
                                               ubbl.assembly_travel(lim, f.sprinklered)
                                               if _assembly_room(f, sp, poly) else lim,
-                                              open_plan or prop(sp, PSET, "OpenPlan") is True)
+                                              open_plan or f.prop(sp, PSET, "OpenPlan") is True)
     return out
 
 
@@ -315,7 +314,7 @@ def _enclosure_findings(pl: Plan, sp, poly, kind: _Enclosed) -> list[Finding]:
             weak.append((e, f"window, not allowed in a {kind.what}"))
             continue
         need = kind.wall_min if e.id() in ids else ubbl.FIRE_DOOR_FRP_MIN
-        m = rating(e)
+        m = pl.facts.rating(e)
         if m is None or m < need:
             weak.append((e, f"{'unrated or unreadable' if m is None else f'{m} min'} (needs {need})"))
     if not weak:
@@ -325,11 +324,11 @@ def _enclosure_findings(pl: Plan, sp, poly, kind: _Enclosed) -> list[Finding]:
                     f"{what}. {kind.note}", kind.clause, [sp.GlobalId] + [e.GlobalId for e, _ in weak])]
 
 
-def assembly_capacity(sp, area) -> tuple[int, str] | None:
+def assembly_capacity(f: Facts, sp, area) -> tuple[int, str] | None:
     """By-law 180: (persons, how) for a room used for assembly, or None for any other room.  Fixed
     seats (MY_FireSafety.FixedSeats) count one each; otherwise the net floor area over the factor
     for the use its name gives."""
-    seats = prop(sp, PSET, "FixedSeats")
+    seats = f.prop(sp, PSET, "FixedSeats")
     if seats is not None:
         return int(seats), f"{int(seats)} fixed seats"
     if named(sp, rooms.CIRCULATION):
@@ -343,7 +342,7 @@ def assembly_capacity(sp, area) -> tuple[int, str] | None:
 
 def _assembly_room(f: Facts, sp, poly) -> tuple[int, str] | None:
     """(persons, how) for a place of assembly (by-law 179: 100 persons or more), else None."""
-    cap = assembly_capacity(sp, f.floor_area(sp) or poly.area)
+    cap = assembly_capacity(f, sp, f.floor_area(sp) or poly.area)
     return cap if cap is not None and ubbl.assembly_class(cap[0]) is not None else None
 
 
@@ -383,16 +382,17 @@ def _assembly_rooms(f: Facts, plans) -> list[Finding]:
     return out
 
 
-def _surface_class(el):
+def _surface_class(f: Facts, el):
     """(element, class) for the face of a wall or ceiling: its lining's class when a covering on it
     (IfcRelCoversBldgElements) states one, the worst of several, else its own; class None if unread."""
     linings = [c for rel in getattr(el, "HasCoverings", None) or () for c in rel.RelatedCoverings]
-    stated = [(c, k) for c in linings if (k := flame_class(common(c, "SurfaceSpreadOfFlame"))) is not None]
+    stated = [(c, k) for c in linings if (k := flame_class(f.common(c, "SurfaceSpreadOfFlame"))) is not None]
     if stated:
         return max(stated, key=lambda ck: ck[1])
-    return el, flame_class(common(el, "SurfaceSpreadOfFlame"))
+    return el, flame_class(f.common(el, "SurfaceSpreadOfFlame"))
 
 
+_SURFACES = ("IfcWall", "IfcCurtainWall", "IfcCovering")     # what has a class of surface spread of flame
 _PLACE_WORDS = {"exits": "an exit (stair)", "access": "an access to exits", "other": "a room"}
 
 
@@ -404,11 +404,11 @@ def _flame_spread(f: Facts, plans) -> list[Finding]:
     Class 0 or 1, storage and service rooms aside (205(4)).  The small-area allowances (206(2)-(3)),
     the hospital allowance for rooms of 4 or fewer, and plastic ceilings (207) are not judged."""
     clause = "UBBL by-law 204-206, Eighth Schedule"
-    surfaces = [e for t in ("IfcWall", "IfcCurtainWall", "IfcCovering") for e in f.model.by_type(t)]
-    if not any(common(e, "SurfaceSpreadOfFlame") is not None for e in surfaces):
+    if not any(any(e.is_a(t) for t in _SURFACES) and f.common(e, "SurfaceSpreadOfFlame") is not None
+               for e in f.carriers("SurfaceSpreadOfFlame")):
         return [Finding("GEO-FLAME-DATA", "info", "No wall or ceiling states its class of surface spread of "
                         "flame (Pset_WallCommon / Pset_CoveringCommon .SurfaceSpreadOfFlame), so by-laws "
-                        "204-206 were not checked", clause, [])] if surfaces else []
+                        "204-206 were not checked", clause, [])]             if any(f.model.by_type(t) for t in _SURFACES) else []
     try:
         key = ubbl.use_key(f.group, f.use)
     except KeyError:
@@ -432,7 +432,7 @@ def _flame_spread(f: Facts, plans) -> list[Finding]:
                 if need is None:
                     continue
                 for e in els:
-                    shown, c = _surface_class(e)
+                    shown, c = _surface_class(f, e)
                     if c is None:
                         unread[e.id()] = e
                     elif c > need:
@@ -487,7 +487,7 @@ def _space_travel_findings(f: Facts, nm, sp, poly, r, fld, lim, open_plan) -> li
                            f"{nm}: walking distance {measured:.1f} m is over the {lim.travel_m:g} m "
                            f"limit by less than the method tolerance ({tol:.1f} m); measure by hand",
                            lim.clause, gid, detail))
-    declared = prop(sp, PSET, "MaxTravelDistance")
+    declared = f.prop(sp, PSET, "MaxTravelDistance")
     if declared is not None and measured > float(declared) * f.scale + tol:
         out.append(Finding("GEO-DECLARED", "warning",
                            f"{nm}: declared travel distance {float(declared) * f.scale:.1f} m, "
@@ -521,7 +521,7 @@ def _building_outline(f: Facts):
 
 
 def _building_volume(f: Facts, outline):
-    vs = [geom.volume(geom.mesh(sp)) for sp in f.model.by_type("IfcSpace")]
+    vs = [geom.volume(f.mesh(sp)) for sp in f.model.by_type("IfcSpace")]
     vs = [v for v in vs if v]
     if vs:
         return sum(vs), "sum of space volumes"
@@ -536,8 +536,8 @@ def _access(f: Facts):
     outline = _building_outline(f)
     vol, how = _building_volume(f, outline)
     access = []
-    for e in f.model.by_type("IfcProduct"):
-        if prop(e, PSET, "FireApplianceAccess") is True:
+    for e in f.carriers("FireApplianceAccess"):
+        if e.is_a("IfcProduct") and f.prop(e, PSET, "FireApplianceAccess") is True:
             fp = f.footprint(e)
             if fp is not None:
                 access.append((e, fp))
@@ -572,7 +572,7 @@ def _access(f: Facts):
         else:
             ds = []
             for h in hyd:
-                p = geom.location(h)
+                p = f.location(h)
                 if p is not None:
                     ds.append((acc.distance(Point(p)), h))
             if ds and min(d for d, _ in ds) > ubbl.HYDRANT_DISTANCE_M:
@@ -594,7 +594,7 @@ def _groups(f: Facts):
             continue
         a = f.floor_area(sp)
         by_group[g] += a
-        cid = prop(sp, PSET, "CompartmentId")
+        cid = f.prop(sp, PSET, "CompartmentId")
         if cid is not None:
             by_comp[cid][g] += a
             comp_members[cid].append(sp.GlobalId)
@@ -637,7 +637,7 @@ def _basement(f: Facts):
                  f"({label(above) if above else '?'})")
         slabs = [s for s in f.model.by_type("IfcSlab")
                  if f.storey_of(s) == above and is_floor_slab(s)]
-        declared = {s: common(s, "Compartmentation") for s in slabs}
+        declared = {s: f.common(s, "Compartmentation") for s in slabs}
         no = [s.GlobalId for s, v in declared.items() if v is False]
         unknown = [s.GlobalId for s, v in declared.items() if v is None]
         if no:
@@ -653,10 +653,11 @@ def _basement(f: Facts):
 
 
 def check(model: ifcopenshell.file, heat_dir: str | None = None, cell: float = 0.2,
-          heatmaps: dict | None = None) -> list[Finding]:
+          heatmaps: dict | None = None, facts: Facts | None = None) -> list[Finding]:
     """heat_dir: write a travel-distance PNG per storey there, and record each in `heatmaps`
-    (storey name -> path) when given."""
-    f = Facts(model)
+    (storey name -> path) when given.  `facts`: the model already read (run.ifc shares one with
+    ifccheck)."""
+    f = facts or Facts(model)
     pls = plans(f)
     out = _enclosed_rooms(pls) + _assembly_rooms(f, pls)
     if f.group in ubbl.PURPOSE_GROUPS:

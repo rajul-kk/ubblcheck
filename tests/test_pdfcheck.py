@@ -21,12 +21,24 @@ def rules(fs):
 
 
 def test_sheet_reading(tmp_path):
-    sheets = pdfread.read(drawings.passive_set(tmp_path / "p.pdf", levels=("GROUND", "FIRST", "SECOND")))
+    sheets = pdfread.read_all([drawings.passive_set(tmp_path / "p.pdf", levels=("GROUND", "FIRST", "SECOND"))])[0]
     assert [s.kind for s in sheets] == ["general", "site_plan", "floor_plan", "floor_plan", "floor_plan"]
     assert [s.level for s in sheets[2:]] == ["L0", "L1", "L2"]
     assert sheets[2].number == "A-100"
     assert sheets[1].colours["yellow"] > pdfcheck.COLOUR_MIN
     assert sheets[2].colours["red"] > pdfcheck.COLOUR_MIN
+
+
+def test_files_read_in_parallel_keep_their_pages(tmp_path, monkeypatch):
+    (tmp_path / "a").mkdir(); (tmp_path / "b").mkdir()
+    p = drawings.passive_set(tmp_path / "a" / "set.pdf", levels=("GROUND", "FIRST", "SECOND"))
+    a = drawings.active_set(tmp_path / "b" / "set.pdf")             # the same file name
+    as_dicts = lambda files: [[s.__dict__ for s in f] for f in files]
+    monkeypatch.setattr(pdfread, "PARALLEL_FROM_PAGES", 10**6)
+    serial = as_dicts(pdfread.read_all([p, a]))
+    monkeypatch.setattr(pdfread, "PARALLEL_FROM_PAGES", 1)
+    assert as_dicts(pdfread.read_all([p, a])) == serial
+    assert [len(f) for f in serial] == [5, 4]
 
 
 @pytest.mark.parametrize("title,level", [

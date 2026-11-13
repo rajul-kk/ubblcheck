@@ -20,7 +20,7 @@ from ifctester import ids
 
 from . import rooms, ubbl
 from .findings import Finding
-from .model import PSET, Facts, common, host_wall, is_floor_slab, label, named, not_floor, objects, prop, rating
+from .model import PSET, Facts, host_wall, is_floor_slab, label, named, not_floor, objects
 
 IDS_DIR = os.path.join(os.path.dirname(__file__), "ids")
 
@@ -64,8 +64,9 @@ def run_ids(model: ifcopenshell.file, ids_paths: list[str]) -> list[Finding]:
 
 # ---------------------------------------------------------------- rule pass
 
-def check_rules(model: ifcopenshell.file) -> list[Finding]:
-    f = Facts(model)
+def check_rules(model: ifcopenshell.file, facts: Facts | None = None) -> list[Finding]:
+    """The schedule rules.  `facts`: the model already read (run.ifc shares one with georules)."""
+    f = facts or Facts(model)
     out: list[Finding] = []
     if f.group not in ubbl.PURPOSE_GROUPS:
         out.append(Finding("IFC-GROUP", "error",
@@ -122,7 +123,7 @@ def _compartments_of(f: Facts, el, st) -> list:
     else every compartment on its storey, so the element is held to the longest of their periods.
     [None] means the building is not divided into compartments."""
     sizes = f.sizes
-    own = prop(el, PSET, "CompartmentId")
+    own = f.prop(el, PSET, "CompartmentId")
     if own is not None:
         ids_ = [c.strip() for c in re.split(r"[,;]", str(own)) if c.strip() in sizes.comp_area]
         if ids_:
@@ -155,30 +156,30 @@ def _structure(f: Facts):
         for el in f.model.by_type(cls):
             if kind == "floor" and not is_floor_slab(el):
                 continue
-            if kind == "wall" and not (common(el, "LoadBearing") is True or common(el, "Compartmentation") is True
-                                       or prop(el, PSET, "SeparatingWall") is True):
+            if kind == "wall" and not (f.common(el, "LoadBearing") is True or f.common(el, "Compartmentation") is True
+                                       or f.prop(el, PSET, "SeparatingWall") is True):
                 continue
             st = f.storey_of(el)
             if st is not None:
                 yield el, kind, st
 
 
-def _exempt_single_storey(el, kind, compartment) -> bool:
+def _exempt_single_storey(f: Facts, el, kind, compartment) -> bool:
     """By-law 216(1): in a single-storey building, the structural frame, beams and columns, and internal
     loadbearing walls that are not compartment walls, need no Ninth Schedule period.  (A beam or
     column in or carrying a wall still needs that wall's period; the model can't say which those are,
     so the info finding names the condition.)"""
     if kind in ("column", "beam"):
         return True
-    return (kind == "wall" and not compartment and common(el, "IsExternal") is not True
-            and prop(el, PSET, "SeparatingWall") is not True)
+    return (kind == "wall" and not compartment and f.common(el, "IsExternal") is not True
+            and f.prop(el, PSET, "SeparatingWall") is not True)
 
 
-def _wall_minimum(el) -> tuple[int, str]:
+def _wall_minimum(f: Facts, el) -> tuple[int, str]:
     """By-law 214(1): minutes a wall needs whatever its Ninth Schedule line, and why (0 if none)."""
-    if prop(el, PSET, "SeparatingWall") is True:
+    if f.prop(el, PSET, "SeparatingWall") is True:
         return ubbl.SEPARATING_WALL_MIN, "separating wall"
-    if common(el, "IsExternal") is True and common(el, "LoadBearing") is True:
+    if f.common(el, "IsExternal") is True and f.common(el, "LoadBearing") is True:
         return ubbl.EXTERNAL_WALL_MIN, "loadbearing external wall"
     return 0, ""
 
@@ -225,7 +226,7 @@ def _element_need(f: Facts, el, kind, st, compartment, lines: _NinthLines) -> _N
             needs.append(_Need(ubbl.element_frp(req, kind, basement or over_basement, compartment, barea),
                                ubbl.NINTH_CLAUSE, req.line, f.sizes.basis(cid)[0]))
     if kind == "wall":
-        least, why = _wall_minimum(el)
+        least, why = _wall_minimum(f, el)
         if least:
             needs.append(_Need(least, ubbl.WALL_MIN_CLAUSE, why))
     return max(needs, key=lambda n: n.minutes, default=None)
@@ -240,11 +241,11 @@ def _ninth(f: Facts):
     single = f.sizes.storeys <= 1 and not f.basements
     short, unread, exempt = defaultdict(list), defaultdict(list), defaultdict(int)
     for el, kind, st in _structure(f):
-        compartment = common(el, "Compartmentation") is True
-        if single and _exempt_single_storey(el, kind, compartment):
+        compartment = f.common(el, "Compartmentation") is True
+        if single and _exempt_single_storey(f, el, kind, compartment):
             exempt[kind] += 1
             continue
-        have = rating(el)
+        have = f.rating(el)
         if have is None:
             if not compartment:     # compartment walls and floors: the IDS pack (MY-P08, MY-P09) reports them
                 unread[kind].append(el)
@@ -308,7 +309,7 @@ def _travel(f: Facts):
     if lim.travel_m is None:
         return out
     for sp in f.model.by_type("IfcSpace"):
-        d = prop(sp, PSET, "MaxTravelDistance")
+        d = f.prop(sp, PSET, "MaxTravelDistance")
         if d is None:
             continue
         d = float(d) * f.scale
@@ -318,7 +319,7 @@ def _travel(f: Facts):
                                f"{lim.travel_m:g} m ({'sprinklered' if f.sprinklered else 'unsprinklered'}, "
                                f"group {f.group})", lim.clause, [sp.GlobalId],
                                {"travel_m": d, "limit_m": lim.travel_m}))
-        dead = prop(sp, PSET, "DeadEndDistance")
+        dead = f.prop(sp, PSET, "DeadEndDistance")
         if dead is not None and lim.dead_end_m is not None and float(dead) * f.scale > lim.dead_end_m:
             out.append(Finding("IFC-DEADEND", "error",
                                f"Space {label(sp)}: dead end {float(dead) * f.scale:.1f} m "
@@ -369,11 +370,11 @@ def _exits(f: Facts):
 def _occupancy_uses(f: Facts) -> list[Finding]:
     """Spaces whose OccupancyUse names no Seventh Schedule row: their occupants are not counted."""
     bad = [sp for sp in f.model.by_type("IfcSpace")
-           if prop(sp, PSET, "OccupancyUse") is not None and not not_floor(sp)
-           and ubbl.load_row(f.group, prop(sp, PSET, "OccupancyUse")) is None]
+           if f.prop(sp, PSET, "OccupancyUse") is not None and not not_floor(sp)
+           and ubbl.load_row(f.group, f.prop(sp, PSET, "OccupancyUse")) is None]
     if not bad:
         return []
-    uses = sorted({str(prop(sp, PSET, "OccupancyUse")) for sp in bad})
+    uses = sorted({str(f.prop(sp, PSET, "OccupancyUse")) for sp in bad})
     rows = sorted(k.split(".", 1)[1] for k in ubbl.OCCUPANT_LOAD if k.startswith(f"{f.group}."))
     return [Finding("IFC-OCCUPANCY", "error",
                     f"{len(bad)} space(s) have an OccupancyUse with no Seventh Schedule row for group {f.group} "
@@ -394,7 +395,7 @@ def _compartment_floors(f: Facts):
         st = f.storey_of(sl)
         if st is None or f.elev(st) <= ubbl.COMPARTMENT_FLOOR_ABOVE_M:
             continue
-        if common(sl, "Compartmentation") is not True:
+        if f.common(sl, "Compartmentation") is not True:
             out.append(Finding("IFC-COMP-FLOOR", "error",
                                f"Building is {f.height_m:.1f} m high; floor on {label(st)} "
                                f"({f.elev(st):.1f} m above ground) must be a compartment floor",
@@ -406,9 +407,9 @@ def _fire_doors(f: Facts):
     out = []
     for d in f.model.by_type("IfcDoor"):
         wall = host_wall(d)
-        if wall is None or not wall.is_a("IfcWall") or common(wall, "Compartmentation") is not True:
+        if wall is None or not wall.is_a("IfcWall") or f.common(wall, "Compartmentation") is not True:
             continue
-        wr, dr = rating(wall), rating(d)
+        wr, dr = f.rating(wall), f.rating(d)
         name = label(d)
         if dr is None:
             out.append(Finding("IFC-FIREDOOR", "error",
@@ -433,12 +434,12 @@ def _door_closers(f: Facts):
     themselves.  Declared not self-closing is an error; doors that don't say are listed in one warning."""
     out, unknown = [], []
     for d in f.model.by_type("IfcDoor"):
-        r = rating(d)
+        r = f.rating(d)
         why = [w for w, applies in (("fire door", r is not None and r >= ubbl.FIRE_DOOR_FRP_MIN),
-                                    ("exit door", common(d, "FireExit") is True)) if applies]
+                                    ("exit door", f.common(d, "FireExit") is True)) if applies]
         if not why:
             continue
-        closing = common(d, "SelfClosing")
+        closing = f.common(d, "SelfClosing")
         if closing is False:
             out.append(Finding("IFC-DOORCLOSER", "error",
                                f"Door {label(d)} ({' and '.join(why)}) is declared not self-closing",
@@ -550,7 +551,7 @@ def _systems(f: Facts):
                                f"Topmost floor is {top:.1f} m above ground: a "
                                f"{'wet' if top > ubbl.WET_RISER_HEIGHT_M else 'dry'} rising system is required; "
                                "no breeching inlet is modelled", "UBBL by-law 229(1), 230(1), 231", []))
-        if not any(prop(t, "Pset_TransportElementElevator", "FireFightingLift") is True
+        if not any(f.prop(t, "Pset_TransportElementElevator", "FireFightingLift") is True
                    for t in f.model.by_type("IfcTransportElement")):
             out.append(Finding("IFC-FIRELIFT", "warning",
                                f"Topmost floor is {top:.1f} m above ground: a fire lift is required; none is "
@@ -576,7 +577,7 @@ def tenth_inputs(f: Facts) -> dict:
     """The building's size as the Tenth Schedule reads it."""
     sizes = f.sizes
     occupied = {s.id() for s in f.occupied}
-    rooms_ = prop(f.building, PSET, "Rooms") if f.building else None
+    rooms_ = f.prop(f.building, PSET, "Rooms") if f.building else None
     return {"storeys": len(f.occupied), "height_m": f.height_m,
             "floor_area_m2": sizes.building_area,
             "total_area_m2": sum(a for sid, a in sizes.storey_area.items() if sid in occupied),
@@ -589,7 +590,7 @@ def _tenth(f: Facts) -> list[Finding]:
     the model.  Emergency lighting and alarm types 3-4 have no IFC object here and are not checked."""
     gid = [f.building.GlobalId] if f.building else []
     try:
-        use = ubbl.tenth_use(f.group, f.use, prop(f.building, PSET, "TenthUse") if f.building else None)
+        use = ubbl.tenth_use(f.group, f.use, f.prop(f.building, PSET, "TenthUse") if f.building else None)
     except KeyError as e:
         return [Finding("IFC-TENTH", "warning", f"{e.args[0]}: set MY_FireSafety.TenthUse on the building",
                         ubbl.TENTH_CLAUSE, gid)]
@@ -626,10 +627,11 @@ def default_ids() -> list[str]:
     return [os.path.join(d, n) for n in ("my-ubbl-passive.ids", "my-ubbl-active.ids")]
 
 
-def check_model(model: ifcopenshell.file, ids_paths: list[str] | None = None, rules: bool = True) -> list[Finding]:
+def check_model(model: ifcopenshell.file, ids_paths: list[str] | None = None, rules: bool = True,
+                facts: Facts | None = None) -> list[Finding]:
     out = run_ids(model, ids_paths if ids_paths is not None else default_ids())
     if rules:
-        out += check_rules(model)
+        out += check_rules(model, facts)
     return out
 
 

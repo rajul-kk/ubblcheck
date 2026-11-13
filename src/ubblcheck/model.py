@@ -13,6 +13,7 @@ from functools import cached_property
 import ifcopenshell
 import ifcopenshell.util.element as uel
 import ifcopenshell.util.unit as uunit
+from shapely.ops import unary_union
 
 from . import geom, rooms, ubbl
 from .ratings import frp_minutes
@@ -28,23 +29,8 @@ COMMON_PSET = {"IfcWall": "Pset_WallCommon", "IfcCurtainWall": "Pset_CurtainWall
                "IfcCovering": "Pset_CoveringCommon", "IfcBuilding": "Pset_BuildingCommon"}
 
 
-def prop(el, pset, name, default=None):
-    return uel.get_psets(el).get(pset, {}).get(name, default)
-
-
 def common_pset(el) -> str | None:
     return next((ps for cls, ps in COMMON_PSET.items() if el.is_a(cls)), None)
-
-
-def common(el, name, default=None):
-    """A property of the element's own common property set (Pset_WallCommon for a wall, ...)."""
-    ps = common_pset(el)
-    return default if ps is None else prop(el, ps, name, default)
-
-
-def rating(el) -> int | None:
-    """The element's FireRating (its common property set) in minutes, or None."""
-    return frp_minutes(common(el, "FireRating"))
 
 
 _FLOOR_SLABS = ("FLOOR", "BASESLAB", "NOTDEFINED", "")
@@ -108,6 +94,11 @@ def not_floor(space) -> bool:
 
 # ---------------------------------------------------------------- facts
 
+# The kinds of element the rules read geometry of, tessellated together when first needed: rooms;
+# walls and columns; floors and roofs; doors and windows through the openings they fill; ceilings.
+MESH_BATCHES = (("IfcSpace",), ("IfcWall", "IfcColumn", "IfcCurtainWall"), ("IfcSlab",),
+                ("IfcOpeningElement", "IfcDoor", "IfcWindow"), ("IfcCovering",))
+
 BASEMENT_BELOW_M = -1.0     # a storey more than 1 m below the ground storey is a basement
 
 
@@ -149,20 +140,25 @@ class Facts:
     """The numbers the rules need, read once from the model in metres.
 
     Quantities are converted with their own project unit: Revit, for one, exports
-    lengths in millimetres but areas in square metres."""
+    lengths in millimetres but areas in square metres.
+
+    Property sets and geometry are read once per element and kept, so a Facts is for a model that
+    no longer changes: build a new one after editing the model."""
 
     def __init__(self, model: ifcopenshell.file):
         self.model = model
+        self._psets, self._qtos, self._meshes, self._footprints, self._volumes = {}, {}, {}, {}, {}
+        self._batched = set()           # the MESH_BATCHES already tessellated
         self.scale = uunit.calculate_unit_scale(model)  # project length unit -> metres
         self.area_scale = uunit.calculate_unit_scale(model, "AREAUNIT")
         self.volume_scale = uunit.calculate_unit_scale(model, "VOLUMEUNIT")
         b = (model.by_type("IfcBuilding") or [None])[0]
         self.building = b
-        self.group = prop(b, PSET, "PurposeGroup") if b else None
-        self.use = prop(b, PSET, "SubUse") if b else None
-        h = prop(b, PSET, "BuildingHeight") if b else None
+        self.group = self.prop(b, PSET, "PurposeGroup") if b else None
+        self.use = self.prop(b, PSET, "SubUse") if b else None
+        h = self.prop(b, PSET, "BuildingHeight") if b else None
         self.height = float(h) * self.scale if h is not None else None     # declared (by-law 135(a))
-        self.sprinklered = bool(common(b, "SprinklerProtectionAutomatic", False)) if b else False
+        self.sprinklered = bool(self.common(b, "SprinklerProtectionAutomatic", False)) if b else False
         self.storeys = sorted(model.by_type("IfcBuildingStorey"), key=lambda s: s.Elevation or 0.0)
         ground = [s for s in self.storeys if (s.Elevation or 0.0) >= -1e-6]
         self.ground_elev = (ground[0].Elevation or 0.0) * self.scale if ground else 0.0
@@ -173,7 +169,42 @@ class Facts:
         self.floor_storeys = {self.storey_of(sp) for sp in model.by_type("IfcSpace") if not not_floor(sp)} - {None}
         occupied = [s for s in self.above_ground if s in self.floor_storeys]
         self.occupied = occupied if occupied else self.above_ground
-        self._meshes, self._footprints, self._volumes = {}, {}, {}
+
+    # -- properties
+
+    def prop(self, el, pset, name, default=None):
+        """A property of an element (its type object's too, where the element does not set it)."""
+        if el.id() not in self._psets:
+            self._psets[el.id()] = uel.get_psets(el)
+        return self._psets[el.id()].get(pset, {}).get(name, default)
+
+    def common(self, el, name, default=None):
+        """A property of the element's own common property set (Pset_WallCommon for a wall, ...)."""
+        ps = common_pset(el)
+        return default if ps is None else self.prop(el, ps, name, default)
+
+    def rating(self, el) -> int | None:
+        """The element's FireRating (its common property set) in minutes, or None."""
+        return frp_minutes(self.common(el, "FireRating"))
+
+    def carriers(self, name: str) -> list:
+        """The elements a property called `name` is set on, directly or through their type object:
+        the only ones a rule reading that property need look at."""
+        def has(pset):
+            return any(p.Name == name for p in getattr(pset, "HasProperties", None) or ())
+        out = {}
+        for rel in self.model.by_type("IfcRelDefinesByProperties"):
+            if has(rel.RelatingPropertyDefinition):
+                out.update((e.id(), e) for e in rel.RelatedObjects)
+        for t in self.model.by_type("IfcTypeObject"):
+            if any(has(ps) for ps in t.HasPropertySets or ()):
+                out.update((e.id(), e) for e in uel.get_types(t))
+        return list(out.values())
+
+    def _qto(self, space) -> dict:
+        if space.id() not in self._qtos:
+            self._qtos[space.id()] = uel.get_psets(space, qtos_only=True).get("Qto_SpaceBaseQuantities", {})
+        return self._qtos[space.id()]
 
     # -- the building
 
@@ -229,10 +260,22 @@ class Facts:
         return self.elev(storey) < BASEMENT_BELOW_M
 
     def mesh(self, el):
-        """The element's geometry (cached: tessellating is the slowest step), or None."""
+        """The element's geometry, or None.  Tessellating is the slowest step, so the first element
+        of a kind (MESH_BATCHES) asked for brings every element of that kind, on all cores, and they
+        are kept.  An element the batch does not return is tessellated on its own."""
+        batch = next((b for b in MESH_BATCHES if any(el.is_a(c) for c in b)), None)
+        if batch is not None and batch not in self._batched:
+            self._batched.add(batch)
+            self._meshes.update(geom.meshes(self.model, self._batch_members(batch)))
         if el.id() not in self._meshes:
             self._meshes[el.id()] = geom.mesh(el)
         return self._meshes[el.id()]
+
+    def _batch_members(self, batch) -> list:
+        out = [e for c in batch for e in self.model.by_type(c)]
+        if "IfcOpeningElement" in batch:    # a door's own body, often detailed, only without an opening
+            out = [e for e in out if e.is_a("IfcOpeningElement") or not e.FillsVoids]
+        return out
 
     def footprint(self, el):
         """Plan footprint of an element's geometry (cached), or None."""
@@ -240,17 +283,40 @@ class Facts:
             self._footprints[el.id()] = geom.footprint(self.mesh(el))
         return self._footprints[el.id()]
 
+    def outline(self, product):
+        """Plan outline of a product: its own body, else the union of the parts it is made of, railings
+        left out (Revit exports a stair as an empty IfcStair aggregating flights, landings, stringers and
+        railings; other tools use IfcMember or IfcBuildingElementProxy for the flights)."""
+        fp = self.footprint(product)
+        if fp is not None and not fp.is_empty:
+            return fp
+        parts = [self.footprint(p) for p in uel.get_decomposition(product) if not p.is_a("IfcRailing")]
+        parts = [p for p in parts if p is not None and not p.is_empty]
+        return unary_union(parts) if parts else None
+
+    def door_outline(self, door):
+        """Plan outline of a door or window: the opening it fills if it has one, else its own body."""
+        for rel in getattr(door, "FillsVoids", []) or []:
+            fp = self.footprint(rel.RelatingOpeningElement)
+            if fp is not None and not fp.is_empty:
+                return fp
+        return self.footprint(door)
+
+    def location(self, product):
+        """Plan position: its mesh centroid, else its placement origin."""
+        return geom.location(product, self.mesh(product))
+
     # -- spaces
 
     def area(self, space) -> float | None:
         """Declared floor area (Qto_SpaceBaseQuantities) in m2, or None."""
-        q = uel.get_psets(space, qtos_only=True).get("Qto_SpaceBaseQuantities", {})
+        q = self._qto(space)
         a = q.get("NetFloorArea", q.get("GrossFloorArea"))
         return None if a is None else float(a) * self.area_scale
 
     def volume(self, space) -> float | None:
         """Declared volume in m3 (or declared area x height), or None."""
-        q = uel.get_psets(space, qtos_only=True).get("Qto_SpaceBaseQuantities", {})
+        q = self._qto(space)
         v = q.get("NetVolume", q.get("GrossVolume"))
         if v is not None:
             return float(v) * self.volume_scale
@@ -283,7 +349,7 @@ class Facts:
         """Occupant load of a space (Seventh Schedule): its floor area, or `area` when given, over
         the load factor of its OccupancyUse, else of the building's group.  None when there is no
         row for it: an unknown use (reported once, IFC-OCCUPANCY) or a group with no load row."""
-        row = ubbl.load_row(self.group, prop(space, PSET, "OccupancyUse"))
+        row = ubbl.load_row(self.group, self.prop(space, PSET, "OccupancyUse"))
         if row is None:
             return None
         return ubbl.occupant_load_for_row(self.floor_area(space) if area is None else area, row)
@@ -300,7 +366,7 @@ class Facts:
             a, v = self.floor_area(sp), self.floor_volume(sp)
             st_area[st.id()] += a
             total_vol += v or 0.0
-            cid = prop(sp, PSET, "CompartmentId")
+            cid = self.prop(sp, PSET, "CompartmentId")
             if cid is None:
                 continue
             cid = str(cid)
@@ -319,7 +385,7 @@ class Facts:
     @cached_property
     def exits_declared(self) -> bool:
         """Does any door say whether it is a fire exit?  When none does, exit checks have nothing to go on."""
-        return any(common(d, "FireExit") is not None for d in self.model.by_type("IfcDoor"))
+        return any(self.common(d, "FireExit") is not None for d in self.model.by_type("IfcDoor"))
 
     @cached_property
     def exits(self) -> dict:
@@ -332,12 +398,12 @@ class Facts:
         doors, stairs = defaultdict(list), defaultdict(list)
         for d in self.model.by_type("IfcDoor"):
             st = self.storey_of(d)
-            if st is not None and common(d, "FireExit") is True:
+            if st is not None and self.common(d, "FireExit") is True:
                 doors[st].append(d)
         above = dict(zip(self.storeys, self.storeys[1:]))
         for s in self.model.by_type("IfcStair"):
             st = self.storey_of(s)
-            if st in above and not self.is_basement(st) and common(s, "FireExit") is True:
+            if st in above and not self.is_basement(st) and self.common(s, "FireExit") is True:
                 stairs[above[st]].append(s)
         out = {st: (ds, False) for st, ds in doors.items()}
         for st, ss in stairs.items():

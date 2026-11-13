@@ -429,12 +429,12 @@ def procedure(sheets: list[pdfread.Sheet], form: Form) -> list[Finding]:
 # ---------------------------------------------------------------- entry
 
 def read_sets(form: Form) -> list[pdfread.Sheet]:
+    files = [(st, p) for st, paths in form.sets.items() for p in paths]
     sheets = []
-    for st, paths in form.sets.items():
-        for p in paths:
-            for s in pdfread.read(p):
-                s.set = st
-                sheets.append(s)
+    for (st, _), read in zip(files, pdfread.read_all([p for _, p in files])):
+        for s in read:
+            s.set = st
+            sheets.append(s)
     return sheets
 
 
