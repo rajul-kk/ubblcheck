@@ -78,7 +78,14 @@ def test_missing_or_wrong_uploads_return_to_the_form(client, tmp_path):
     assert r.status_code == 400 and "not a .pdf" in r.get_data(as_text=True)
     r = client.post("/ifc", data={"model": (io.BytesIO(b"not ifc"), "m.ifc"), "geometry": "on"},
                     content_type="multipart/form-data")
-    assert r.status_code == 400 and "could not be checked" in r.get_data(as_text=True)
+    assert r.status_code == 400 and "not an IFC file" in r.get_data(as_text=True)
+    r = client.post("/pdf", data={**_pdf_form(tmp_path), "passive": [(io.BytesIO(b"<html>"), "a.pdf")]},
+                    content_type="multipart/form-data")
+    assert r.status_code == 400 and "not a PDF file" in r.get_data(as_text=True)
+    r = client.post("/ifc", data={"model": (io.BytesIO(b"ISO-10303-21;\nbroken"), "m.ifc")},
+                    content_type="multipart/form-data")
+    html = r.get_data(as_text=True)
+    assert r.status_code == 400 and "could not be checked" in html and str(tmp_path) not in html   # no server paths
     assert not any((tmp_path / "work").iterdir())              # failed runs leave nothing behind
 
 
@@ -116,3 +123,41 @@ def test_only_run_outputs_are_served(client, tmp_path):
 def test_other_host_names_are_refused(client):
     assert client.get("/", headers={"Host": "evil.example:8765"}).status_code == 400
     assert client.get("/", headers={"Host": "127.0.0.1:8765"}).status_code == 200
+
+
+def test_posts_from_other_sites_are_refused(client):
+    r = client.post("/ifc", headers={"Origin": "https://evil.example"}, data={})
+    assert r.status_code == 403
+    r = client.post("/ifc", headers={"Origin": "http://localhost"}, data={}, content_type="multipart/form-data")
+    assert r.status_code == 400                                 # same origin: on to the form check
+
+
+def test_pages_cannot_be_framed_or_sniffed(client):
+    h = client.get("/").headers
+    assert h["X-Frame-Options"] == "DENY" and h["X-Content-Type-Options"] == "nosniff"
+    assert "default-src 'self'" in h["Content-Security-Policy"]
+
+
+def test_one_check_at_a_time(client, tmp_path, monkeypatch):
+    import threading
+    from ubblcheck import run
+    started, release = threading.Event(), threading.Event()
+    real = run.ifc
+
+    def slow(*a, **kw):
+        started.set()
+        release.wait(10)
+        return real(*a, **kw)
+    monkeypatch.setattr(run, "ifc", slow)
+    m = tmp_path / "office.ifc"
+    ifcmodel.office().write(str(m))
+    first = {}
+    th = threading.Thread(target=lambda: first.setdefault("r", client.application.test_client().post(
+        "/ifc", data={"model": _file(m)}, content_type="multipart/form-data")))
+    th.start()
+    assert started.wait(10)
+    r = client.post("/ifc", data={"model": _file(m)}, content_type="multipart/form-data")
+    release.set()
+    th.join(30)
+    assert r.status_code == 503 and "Another check is running" in r.get_data(as_text=True)
+    assert first["r"].status_code == 302

@@ -51,3 +51,25 @@ model doesn't contain.
 
 These were all architecture models from Europe and the US. A real Malaysian Bomba model is
 still the test that matters (see `ambitions.md`).
+
+## Time and peak memory
+
+The baseline later changes are compared against. Measured on 2026-11-13 on the development
+laptop (i7-1355U, 16 GB, otherwise idle), one fresh process per model, `run.ifc` with heatmaps.
+Peak memory is the whole process tree's resident memory, sampled every 0.1 s. "Before" is
+the code before the speed-up (commit 003b8fd). The findings are identical in both.
+
+| Input | Before | Now |
+|---|---|---|
+| duplex | 2.9 s, 111 MB | 2.0 s, 117 MB |
+| AC20-FZK-Haus | 3.9 s, 121 MB | 3.0 s, 130 MB |
+| Office_A | 7.3 s, 121 MB | 3.4 s, 128 MB |
+| Building-Architecture IFC2X3 / IFC4 | 1.5 s, 98 MB | 1.5 s, 100 MB |
+| C20-Institute-Var-2 | 12.2 s, 156 MB | 5.4 s, 197 MB |
+| dental_clinic | 19.3 s, 168 MB | 7.1 s, 181 MB |
+| schependomlaan (49 MB) | 36.4 s, 347 MB | 15.1 s, 460 MB |
+| 163-page PDF, read | 24.4 s, 1247 MB | 11.1 s, 254 MB |
+
+Opening schependomlaan alone peaks at about 345 MB. The rest of the larger peak now comes
+from tessellating on every core at once; 4 threads would save about 25 MB and cost about 2 s.
+Repeated runs of the same model vary by about 10% in peak memory.

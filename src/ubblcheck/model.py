@@ -174,9 +174,10 @@ class Facts:
 
     def prop(self, el, pset, name, default=None):
         """A property of an element (its type object's too, where the element does not set it)."""
-        if el.id() not in self._psets:
-            self._psets[el.id()] = uel.get_psets(el)
-        return self._psets[el.id()].get(pset, {}).get(name, default)
+        key = (el.id(), pset)           # only the sets the rules read: an element's others can be many
+        if key not in self._psets:
+            self._psets[key] = uel.get_pset(el, pset) or {}
+        return self._psets[key].get(name, default)
 
     def common(self, el, name, default=None):
         """A property of the element's own common property set (Pset_WallCommon for a wall, ...)."""

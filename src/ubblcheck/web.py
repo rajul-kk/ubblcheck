@@ -15,11 +15,15 @@ from __future__ import annotations
 import datetime
 import json
 import os
+import logging
 import re
 import shutil
 import sys
 import tempfile
+import threading
+import time
 import uuid
+from urllib.parse import urlsplit
 
 from flask import Flask, abort, redirect, render_template, request, send_from_directory, url_for
 from werkzeug.utils import secure_filename
@@ -29,6 +33,13 @@ from . import findings as fnd
 
 RUN_ID = re.compile(r"^[0-9a-f]{32}$")
 MAX_UPLOAD_MB = 512
+# What each upload must start with: the extension alone says nothing about the content.
+MAGIC = {".ifc": b"ISO-10303-21", ".pdf": b"%PDF-"}
+# Headers on every response: no framing (clickjacking), no type sniffing, own scripts only.
+HEADERS = {"X-Content-Type-Options": "nosniff", "X-Frame-Options": "DENY", "Referrer-Policy": "no-referrer",
+           "Content-Security-Policy": "default-src 'self'; img-src 'self' data:; frame-ancestors 'none'"}
+
+log = logging.getLogger("ubblcheck.web")
 
 
 class InputError(ValueError):
@@ -48,6 +59,24 @@ def create_app(work_dir: str | None = None, trusted_hosts: list[str] | None = LO
     app.config["TRUSTED_HOSTS"] = trusted_hosts
     app.config["WORK_DIR"] = os.path.abspath(work_dir or tempfile.mkdtemp(prefix="ubblcheck-"))
     os.makedirs(app.config["WORK_DIR"], exist_ok=True)
+    # One check at a time: a large model takes GBs of RAM and every core, so a second one at once
+    # could run the machine out of memory.  The second is told to retry, not queued.
+    busy = threading.Lock()
+
+    @app.before_request
+    def same_origin_posts():
+        """A page on another site can post a form here (the browser sends it to 127.0.0.1 as is);
+        a post whose Origin is not this page is refused."""
+        origin = request.headers.get("Origin")
+        if request.method == "POST" and origin and urlsplit(origin).netloc != request.host:
+            log.warning("refused a post from %s", origin)
+            abort(403)
+
+    @app.after_request
+    def security_headers(resp):
+        for k, v in HEADERS.items():
+            resp.headers.setdefault(k, v)
+        return resp
 
     def run_dir(rid: str) -> str:
         if not RUN_ID.match(rid):
@@ -76,13 +105,24 @@ def create_app(work_dir: str | None = None, trusted_hosts: list[str] | None = LO
     def start(work, fields=None):
         """Run work(d) -> (Run, upload names) in a new run folder; on bad input, back to the form
         with the message and what was typed, and nothing left behind."""
+        if not busy.acquire(blocking=False):
+            return page("Another check is running; try again when it has finished.", fields, 503)
         rid, d = new_run()
+        t0 = time.perf_counter()
         try:
             r, names = work(d)
         except InputError as e:
             shutil.rmtree(d, ignore_errors=True)
+            log.info("run %s refused in %.1f s: %s", rid, time.perf_counter() - t0, e)
             return page(str(e), fields, 400)
+        except Exception:
+            shutil.rmtree(d, ignore_errors=True)
+            raise
+        finally:
+            busy.release()
         _record(d, r, names)
+        log.info("run %s: %s %s, %s in %.1f s", rid, r.kind, ", ".join(names), r.counts,
+                 time.perf_counter() - t0)
         return redirect(url_for("result", rid=rid))
 
     @app.post("/ifc")
@@ -94,16 +134,15 @@ def create_app(work_dir: str | None = None, trusted_hosts: list[str] | None = LO
         def work(d):
             if up is None or not up.filename:
                 raise InputError("Choose an IFC model to check.")
-            if not up.filename.lower().endswith(".ifc"):
-                raise InputError(f"{up.filename} is not an .ifc file.")
             cell = _number(request.form.get("cell"), 0.2, 0.05, 1.0,
                            "Grid cell must be a number of metres between 0.05 and 1.")
-            path = _save(up, os.path.join(d, "in"))
+            path = _save(up, os.path.join(d, "in"), ".ifc")
             try:
                 r = run.ifc(path, os.path.join(d, "out"), geometry=geometry, heatmaps=heatmaps, cell=cell)
             except Exception as exc:  # noqa: BLE001  an unreadable model is bad input, not our crash
-                app.logger.exception("IFC check failed")
-                raise InputError(f"{up.filename} could not be checked: {type(exc).__name__}: {exc}") from exc
+                log.exception("IFC check of %s failed", up.filename)     # the detail stays in the log:
+                raise InputError(f"{up.filename} could not be checked ({type(exc).__name__}); "  # it names
+                                 "the server log has the details.") from exc                   # server paths
             return r, [up.filename]
 
         return start(work)
@@ -122,17 +161,16 @@ def create_app(work_dir: str | None = None, trusted_hosts: list[str] | None = LO
                 for up in request.files.getlist(st):
                     if not up or not up.filename:
                         continue
-                    if not up.filename.lower().endswith(".pdf"):
-                        raise InputError(f"{up.filename} is not a .pdf file.")
-                    sets.setdefault(st, []).append(_save(up, os.path.join(d, "in", st)))
+                    sets.setdefault(st, []).append(_save(up, os.path.join(d, "in", st), ".pdf"))
                     names.append(up.filename)
             if not sets:
                 raise InputError("Add at least one PDF drawing set.")
             try:
                 r = run.pdf(pdfcheck.Form.from_dict({**fields, "sets": sets}), os.path.join(d, "out"))
             except Exception as exc:  # noqa: BLE001
-                app.logger.exception("drawing-set check failed")
-                raise InputError(f"The drawings could not be read: {type(exc).__name__}: {exc}") from exc
+                log.exception("drawing-set check failed")
+                raise InputError(f"The drawings could not be read ({type(exc).__name__}); "
+                                 "the server log has the details.") from exc
             return r, names
 
         return start(work, fields)
@@ -169,7 +207,17 @@ def _number(raw, default: float, lo: float, hi: float, message: str) -> float:
     return v
 
 
-def _save(up, folder: str) -> str:
+def _save(up, folder: str, ext: str) -> str:
+    """Saves an upload of type `ext` (a MAGIC key) under a safe name; InputError when its name or
+    its content is not of that type."""
+    kind = ext[1:].upper()
+    if not up.filename.lower().endswith(ext):
+        raise InputError(f"{up.filename} is not a{'n' if kind[0] in 'AEIOU' else ''} {ext} file.")
+    head = up.stream.read(1024).lstrip(b"\xef\xbb\xbf \t\r\n")
+    up.stream.seek(0)
+    if not head.startswith(MAGIC[ext]):
+        raise InputError(f"{up.filename} is not a{'n' if kind[0] in 'AEIOU' else ''} {kind} file: "
+                         f"it does not start with {MAGIC[ext].decode()}.")
     os.makedirs(folder, exist_ok=True)
     name = secure_filename(up.filename) or "upload"
     path = os.path.join(folder, name)
@@ -221,6 +269,7 @@ def serve(host: str = "127.0.0.1", port: int = 8765, work_dir: str | None = None
     local = host in ("::1", *LOCAL_HOSTS)
     if not local:
         print(f"ubblcheck: listening on {host}: anyone who can reach it can upload and read results", file=sys.stderr)
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     app = create_app(work_dir, LOCAL_HOSTS if local else None)
     print(f"ubblcheck: http://{host}:{port}  (results in {app.config['WORK_DIR']}; Ctrl+C to stop)")
     app.run(host=host, port=port, debug=False)

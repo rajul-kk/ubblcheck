@@ -48,6 +48,15 @@ one folder per check. The page listens on 127.0.0.1 and answers only to
 local host names. It has no log-in, so `--host 0.0.0.0` lets anyone on the
 network upload drawings and read the results.
 
+It runs one check at a time, because a check uses every core and a large
+model takes a few hundred MB to GBs of RAM; a second upload meanwhile is asked
+to retry. An upload must really be an IFC
+or PDF file, not just be named like one. A form posted from another web site
+is refused, and the pages can't be framed by one. Each check is logged with its
+timing; an error shows its type on the page and its details in the server log.
+`ubblcheck -v ifc ...` logs the same timings on the command line (`-vv` adds
+elements the geometry kernel could not read).
+
 ## Checking a drawing set
 
 ```

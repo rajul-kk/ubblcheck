@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import logging
 import os
 import threading
 
@@ -22,6 +23,8 @@ from shapely.ops import polygonize, unary_union
 
 CUT_HEIGHT = 1.0          # m above storey level: below door heads, above sills
 EPS = 1e-9
+
+log = logging.getLogger("ubblcheck.geom")
 
 
 @dataclass
@@ -53,13 +56,15 @@ def mesh(product) -> Mesh | None:
         return None
     try:
         sh = ifcopenshell.geom.create_shape(settings(), product)
-    except Exception:
+    except Exception as e:      # the kernel's own errors: the rules treat it as an element without a body
+        log.debug("no geometry for #%d %s: %s", product.id(), product.is_a(), e)
         return None
     return _to_mesh(sh.geometry)
 
 
 # one batch at a time, whatever runs at once (two checks from the web page): each uses every core
 _BATCH = threading.Lock()
+BATCH_SIZE = 200
 
 
 def meshes(model, products) -> dict:
@@ -68,19 +73,20 @@ def meshes(model, products) -> dict:
     not read, or the kernel stopped before it) is for mesh() to try on its own."""
     include = [e for e in products if getattr(e, "Representation", None)]
     out = {}
-    if not include:
-        return out
     with _BATCH:
-        try:
-            it = ifcopenshell.geom.iterator(settings(), model, max(1, (os.cpu_count() or 2) - 1), include=include)
-            if it.initialize():
-                while True:
-                    sh = it.get()
-                    out[sh.id] = _to_mesh(sh.geometry)
-                    if not it.next():
-                        break
-        except Exception:       # the kernel's own errors: what is left goes one by one through mesh()
-            pass
+        # in chunks: the kernel's working memory grows with the batch (+45 MB peak at 470 walls)
+        for i in range(0, len(include), BATCH_SIZE):
+            chunk = include[i:i + BATCH_SIZE]
+            try:
+                it = ifcopenshell.geom.iterator(settings(), model, max(1, (os.cpu_count() or 2) - 1), include=chunk)
+                if it.initialize():
+                    while True:
+                        sh = it.get()
+                        out[sh.id] = _to_mesh(sh.geometry)
+                        if not it.next():
+                            break
+            except Exception as e:  # the kernel's own errors: what is left goes one by one through mesh()
+                log.warning("batch tessellation of %d elements stopped (%s); the rest go one by one", len(chunk), e)
     return out
 
 

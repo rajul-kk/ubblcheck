@@ -33,8 +33,7 @@ sets:
 
 
 def _report(r) -> int:
-    s = r.summary
-    print(f"{s['error']} errors, {s['warning']} warnings, {s['info']} info")
+    print(r.counts)
     for role in ("bcf", "json", "report"):
         if role in r.files:
             print(f"  {r.files[role]}")
@@ -82,6 +81,7 @@ def cmd_serve(args) -> int:
 def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="ubblcheck", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("-v", "--verbose", action="count", default=0, help="log timings (-vv: and skipped elements)")
     sub = ap.add_subparsers(dest="cmd", required=True)
     a = sub.add_parser("ifc")
     a.add_argument("model")
@@ -113,6 +113,10 @@ def parser() -> argparse.ArgumentParser:
 
 def main(argv=None):
     args = parser().parse_args(argv)
+    if args.verbose:            # timings per check and per step, and elements the kernel could not read
+        import logging
+        logging.basicConfig(level=logging.DEBUG if args.verbose > 1 else logging.INFO,
+                            format="%(levelname)s %(name)s: %(message)s")
     return args.func(args)
 
 
